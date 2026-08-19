@@ -57,11 +57,20 @@ Args after `--` go to the spawned `pi --mode rpc`. The runner dials out and reco
 
 **Laptop**
 
+pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` tools) and the `remote-runner` skill. Install once:
+
 ```sh
-pi -e /path/to/extension.ts --tower wss://hq.example.com --tower-token <shared-token>
+pi install git:github.com/<you>/pi-tower   # or npm:pi-tower, or /local/path
+pi -e /local/path                          # try without installing (this run only)
 ```
 
-Or copy `extension.ts` into `~/.pi/agent/extensions/` for auto-discovery and pass only the flags. Then prompt: "use runner_task on win-test-1 to ...". `runner_list` shows who's online.
+Then start pi with the tower flags and prompt "use runner_task on win-test-1 to ...":
+
+```sh
+pi --tower wss://hq.example.com --tower-token <shared-token>
+```
+
+Providers with a direct API key see the extension tools natively. Providers that run their agent loop server-side (and never expose extension tools) get the `remote-runner` skill instead, which teaches the model the `pi-task` CLI below.
 
 ## pi-task CLI
 
@@ -73,7 +82,9 @@ pi-task --list                    # who's online
 pi-task win-test-1 "run the failing job and report the error"
 ```
 
-Progress streams to stderr; stdout carries only the final answer, so `$(pi-task ...)` captures cleanly. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner. Add a line to your project's AGENTS.md so agents discover it:
+Progress streams to stderr; stdout carries only the final answer, so `$(pi-task ...)` captures cleanly. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner.
+
+pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 
 ```md
 Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL, PI_TOWER_TOKEN).
