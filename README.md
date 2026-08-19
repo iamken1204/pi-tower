@@ -49,6 +49,15 @@ Three roles, each runnable on any machine (even all three on one box); the runne
 npx pi-tower --port 9000 --token <shared-token>   # or PI_TOWER_TOKEN env
 ```
 
+Or with Docker plus a Cloudflare Tunnel (no exposed port, TLS terminates at the edge):
+
+```sh
+cp .env.example .env   # set PI_TOWER_TOKEN and TUNNEL_TOKEN
+docker compose up -d
+```
+
+In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower:9000`; the tower URL everywhere else is then `wss://<that-hostname>`.
+
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh
