@@ -1,5 +1,7 @@
 # pi-tower
 
+![pi-tower](assets/cover.svg)
+
 Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Register a headless pi on any machine, then let an interactive pi session anywhere dispatch tasks to it by name — like calling a remote coding agent as a tool.
 
 ```
