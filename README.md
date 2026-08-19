@@ -5,7 +5,7 @@
 Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Register a headless pi on any machine, then let an interactive pi session anywhere dispatch tasks to it by name — like calling a remote coding agent as a tool.
 
 ```
-┌─────────────────────────── laptop (interactive) ─────────────────────────────────┐
+┌────────────────────── interactive pi (anywhere) ─────────────────────────────────┐
 │  process: pi (interactive TUI)                                                   │
 │  ┌────────────────────────────────────────────────────────────┐                  │
 │  │  extension.ts                                              │                  │
@@ -17,7 +17,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
                                                                       │
                                               wss (RPC JSONL frames, token auth)
                                                                       │
-┌───────────────────────────── tower (any VPS) ───────────────────────┼────────────┐
+┌────────────────── tower (any reachable host) ───────────────────────┼────────────┐
 │  process: pi-tower (tower.mjs)                                      ▼            │
 │  ┌────────────────────────────────────────────────────────────┐                  │
 │  │  registry: { "win-test-1" → control ws + session pipes }   │                  │
@@ -28,7 +28,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
                                   │
               wss outbound (runner dials out, NAT/firewall friendly)
                                   │
-┌────────────────────────── runner PC (e.g. CI box) ─┼─────────────────────────────┐
+┌───────────────────── runner (any machine with pi) ─┼─────────────────────────────┐
 │  process: pi-runner (runner.mjs)                   │                             │
 │  ┌─────────────────────────────────────────────────┴──────────┐                  │
 │  │  pi-runner --hq wss://hq.example.com --id win-test-1       │                  │
@@ -41,15 +41,15 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
-Everything lives in this package; runners and the laptop also need `pi` installed.
+Three roles, each runnable on any machine (even all three on one box); the runner and interactive sides also need `pi` installed.
 
-**Tower (VPS)**
+**Tower** (any host the runner and interactive sides can both reach)
 
 ```sh
 npx pi-tower --port 9000 --token <shared-token>   # or PI_TOWER_TOKEN env
 ```
 
-**Runner PC**
+**Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh
 npx pi-runner --hq wss://hq.example.com --id win-test-1 --token <shared-token> -- --no-session
@@ -57,7 +57,7 @@ npx pi-runner --hq wss://hq.example.com --id win-test-1 --token <shared-token> -
 
 Args after `--` go to the spawned `pi --mode rpc`. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
-**Laptop**
+**Interactive side** (wherever you drive pi from)
 
 pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` tools) and the `remote-runner` skill. Install once:
 
