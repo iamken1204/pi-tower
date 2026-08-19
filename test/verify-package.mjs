@@ -2,6 +2,7 @@
 // --tower proves the extension loaded: pi rejects flags no extension registered as "Unknown option".
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 
 const pi = spawn(
 	"pi",
@@ -60,5 +61,9 @@ console.log("ok no extension errors");
 
 clearTimeout(killTimer);
 pi.kill("SIGTERM");
+// Parent must outlive the child, or the closing pipe races pi's own shutdown output.
+const killFallback = setTimeout(() => pi.kill("SIGKILL"), 2000);
+await once(pi, "exit");
+clearTimeout(killFallback);
 console.log("verify-package: all green");
 process.exit(0);
