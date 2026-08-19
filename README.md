@@ -63,6 +63,22 @@ pi -e /path/to/extension.ts --tower wss://hq.example.com --tower-token <shared-t
 
 Or copy `extension.ts` into `~/.pi/agent/extensions/` for auto-discovery and pass only the flags. Then prompt: "use runner_task on win-test-1 to ...". `runner_list` shows who's online.
 
+## pi-task CLI
+
+Some providers run their agent loop server-side and never expose extension-registered tools to the model. `pi-task` is the provider-agnostic fallback: any agent (or human) dispatches with one shell command instead of the extension tools.
+
+```sh
+export PI_TOWER_URL=wss://hq.example.com PI_TOWER_TOKEN=<shared-token>
+pi-task --list                    # who's online
+pi-task win-test-1 "run the failing job and report the error"
+```
+
+Progress streams to stderr; stdout carries only the final answer, so `$(pi-task ...)` captures cleanly. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner. Add a line to your project's AGENTS.md so agents discover it:
+
+```md
+Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL, PI_TOWER_TOKEN).
+```
+
 ## Wire contract
 
 The tower is a pure relay: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions.
@@ -91,4 +107,4 @@ Single shared token checked on every upgrade and HTTP request. Run the tower beh
 npm run verify
 ```
 
-Three assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), and the extension's tools driven against a fake runner.
+Three assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), and the extension's tools plus the `pi-task` CLI driven against a fake runner.
