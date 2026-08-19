@@ -1,0 +1,94 @@
+# pi-tower
+
+Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Register a headless pi on any machine, then let an interactive pi session anywhere dispatch tasks to it by name — like calling a remote coding agent as a tool.
+
+```
+┌─────────────────────────── laptop (interactive) ─────────────────────────────────┐
+│  process: pi (interactive TUI)                                                   │
+│  ┌────────────────────────────────────────────────────────────┐                  │
+│  │  extension.ts                                              │                  │
+│  │  ├─ registerFlag("--tower", "--tower-token")               │                  │
+│  │  └─ registerTool("runner_list", "runner_task")             │                  │
+│  │       execute() ──── wss ────────────────────────────────────────┐            │
+│  └────────────────────────────────────────────────────────────┘     │            │
+└─────────────────────────────────────────────────────────────────────┼────────────┘
+                                                                      │
+                                              wss (RPC JSONL frames, token auth)
+                                                                      │
+┌───────────────────────────── tower (any VPS) ───────────────────────┼────────────┐
+│  process: pi-tower (tower.mjs)                                      ▼            │
+│  ┌────────────────────────────────────────────────────────────┐                  │
+│  │  registry: { "win-test-1" → runner socket, ... }           │                  │
+│  │  pure relay: client frames ──→ runner, runner ──→ client   │                  │
+│  │  one attached client per runner at a time                  │                  │
+│  └──────────────────────────────▲─────────────────────────────┘                  │
+└─────────────────────────────────┼────────────────────────────────────────────────┘
+                                  │
+              wss outbound (runner dials out, NAT/firewall friendly)
+                                  │
+┌────────────────────────── runner PC (e.g. CI box) ─┼─────────────────────────────┐
+│  process: pi-runner (runner.mjs)                   │                             │
+│  ┌─────────────────────────────────────────────────┴──────────┐                  │
+│  │  pi-runner --hq wss://hq.example.com --id win-test-1       │                  │
+│  │  pipes: wss frame ↔ child stdin/stdout (LF JSONL)          │                  │
+│  └───────────────┬────────────────────────────────────────────┘                  │
+│                  ▼                                                               │
+│  child process: pi --mode rpc   (full agent, tools run locally)                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Setup
+
+Everything lives in this package; runners and the laptop also need `pi` installed.
+
+**Tower (VPS)**
+
+```sh
+npx pi-tower --port 9000 --token <shared-token>   # or PI_TOWER_TOKEN env
+```
+
+**Runner PC**
+
+```sh
+npx pi-runner --hq wss://hq.example.com --id win-test-1 --token <shared-token> -- --no-session
+```
+
+Args after `--` go to the spawned `pi --mode rpc`. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
+
+**Laptop**
+
+```sh
+pi -e /path/to/extension.ts --tower wss://hq.example.com --tower-token <shared-token>
+```
+
+Or copy `extension.ts` into `~/.pi/agent/extensions/` for auto-discovery and pass only the flags. Then prompt: "use runner_task on win-test-1 to ...". `runner_list` shows who's online.
+
+## Wire contract
+
+The tower is a pure relay: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /` | health, returns `pi-tower` |
+| `GET /runners?token=t` | JSON `[{id, connectedAt, busy}]` |
+| `WS /runner?id=<id>&token=t` | runner registration; same id reconnect replaces the old socket |
+| `WS /attach?runner=<id>&token=t` | client attachment, one per runner |
+
+| Close code | Meaning |
+|-----------|---------|
+| 4001 | bad token |
+| 4004 | unknown runner (reason lists online ids) |
+| 4005 | runner busy (another client attached) |
+| 4006 | runner disconnected while attached |
+
+## Security
+
+Single shared token checked on every upgrade and HTTP request. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
+
+## Verify
+
+```sh
+npm run verify
+```
+
+Three assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), and the extension's tools driven against a fake runner.
