@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 
 const pi = spawn(
 	"pi",
-	["-e", ".", "--tower", "ws://127.0.0.1:9", "--tower-token", "x", "--mode", "rpc", "--no-session"],
+	// -ne isolates from user-installed packages (a global pi-tower would conflict on --tower)
+	["-ne", "-e", ".", "--tower", "ws://127.0.0.1:9", "--tower-token", "x", "--mode", "rpc", "--no-session"],
 	{
 		cwd: new URL("..", import.meta.url).pathname,
 		stdio: ["pipe", "pipe", "inherit"],
