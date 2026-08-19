@@ -110,7 +110,7 @@ Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --
 
 Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
-Every HTTP request and WebSocket upgrade authenticates with an `Authorization: Bearer <token>` header.
+Every HTTP request and WebSocket upgrade authenticates with an `Authorization: Bearer <token>` header. The tower pings every connection every 30s and terminates peers that miss two pings.
 
 | Endpoint | Purpose |
 |----------|---------|

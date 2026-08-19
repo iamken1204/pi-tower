@@ -67,9 +67,25 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 				ws.close(4001, "bad token");
 				return;
 			}
+			ws.isAlive = true;
+			ws.on("pong", () => (ws.isAlive = true));
 			route(ws, url.searchParams);
 		});
 	});
+
+	// Proxies (Cloudflare's edge among them) drop idle WebSockets; a peer that misses
+	// two pings is gone, so terminate it to trigger the normal close-path cleanup.
+	const heartbeat = setInterval(() => {
+		for (const ws of wss.clients) {
+			if (ws.isAlive === false) {
+				ws.terminate();
+				continue;
+			}
+			ws.isAlive = false;
+			ws.ping();
+		}
+	}, 30000);
+	server.on("close", () => clearInterval(heartbeat));
 
 	function failPending(key, code, reason) {
 		const p = pending.get(key);
@@ -195,4 +211,6 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 	const { port, token } = parseArgs(process.argv.slice(2));
 	createTower({ token }).listen(port, () => console.log(`pi-tower listening on :${port}`));
+	// As container PID 1, node has no default signal dispositions, so docker stop would otherwise hang 10s to SIGKILL.
+	for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(0));
 }
