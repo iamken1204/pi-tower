@@ -3,7 +3,7 @@
 const httpFromWs = (url) => url.replace(/^ws/, "http");
 
 export async function listRunners(tower, token) {
-	const res = await fetch(`${httpFromWs(tower)}/runners?token=${encodeURIComponent(token)}`);
+	const res = await fetch(`${httpFromWs(tower)}/runners`, { headers: { authorization: `Bearer ${token}` } });
 	if (!res.ok) throw new Error(`tower responded ${res.status}`);
 	return res.json();
 }
@@ -16,9 +16,10 @@ export function formatRunners(runners) {
 }
 
 export async function runTask({ tower, token, runnerId, session, prompt, fresh, signal, onDelta }) {
+	// { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
 	const ws = new WebSocket(
-		`${tower}/attach?runner=${encodeURIComponent(runnerId)}&token=${encodeURIComponent(token)}` +
-			(session ? `&session=${encodeURIComponent(session)}` : ""),
+		`${tower}/attach?runner=${encodeURIComponent(runnerId)}` + (session ? `&session=${encodeURIComponent(session)}` : ""),
+		{ headers: { authorization: `Bearer ${token}` } },
 	);
 	const send = (obj) => ws.send(JSON.stringify(obj));
 

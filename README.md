@@ -110,13 +110,15 @@ Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --
 
 Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
+Every HTTP request and WebSocket upgrade authenticates with an `Authorization: Bearer <token>` header.
+
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | health, returns `pi-tower` |
-| `GET /runners?token=t` | JSON `[{id, connectedAt, sessions}]` |
-| `WS /runner?id=<id>&token=t` | runner control channel; same id reconnect replaces the socket, live sessions survive |
-| `WS /runner-session?id=<id>&session=<name>&token=t` | runner-dialed data pipe, one per session |
-| `WS /attach?runner=<id>&session=<name>&token=t` | client attachment, one per session (`session` defaults to `main`) |
+| `GET /runners` | JSON `[{id, connectedAt, sessions}]` |
+| `WS /runner?id=<id>` | runner control channel; same id reconnect replaces the socket, live sessions survive |
+| `WS /runner-session?id=<id>&session=<name>` | runner-dialed data pipe, one per session |
+| `WS /attach?runner=<id>&session=<name>` | client attachment, one per session (`session` defaults to `main`) |
 
 | Close code | Meaning |
 |-----------|---------|
@@ -130,7 +132,7 @@ Detaching a client leaves its session pipe idle on the tower, so a later attach 
 
 ## Security
 
-Single shared token checked on every upgrade and HTTP request. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
+Single shared token, sent as an Authorization header on every upgrade and HTTP request, so it stays out of URLs and access logs. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
 
 ## Verify
 

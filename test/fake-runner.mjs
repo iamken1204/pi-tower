@@ -3,7 +3,10 @@ export const cannedAnswer = (session) => `canned final answer from ${session}`;
 export const CANNED_ANSWER = cannedAnswer("main");
 
 function dialPipe(port, token, id, session, pipes) {
-	const ws = new WebSocket(`ws://127.0.0.1:${port}/runner-session?id=${id}&session=${session}&token=${token}`);
+	const ws = new WebSocket(
+		`ws://127.0.0.1:${port}/runner-session?id=${id}&session=${session}`,
+		{ headers: { authorization: `Bearer ${token}` } },
+	);
 	pipes.set(session, ws);
 	ws.onmessage = (ev) => {
 		const cmd = JSON.parse(ev.data);
@@ -26,7 +29,7 @@ function dialPipe(port, token, id, session, pipes) {
 }
 
 export function connectFakeRunner(port, token, id, { ignoreOpen = false } = {}) {
-	const ws = new WebSocket(`ws://127.0.0.1:${port}/runner?id=${id}&token=${token}`);
+	const ws = new WebSocket(`ws://127.0.0.1:${port}/runner?id=${id}`, { headers: { authorization: `Bearer ${token}` } });
 	const opens = [];
 	const pipes = new Map(); // session name -> pipe ws
 	ws.onmessage = (ev) => {

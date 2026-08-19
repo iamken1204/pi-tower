@@ -27,6 +27,8 @@ function parseArgs(argv) {
 }
 
 const { hq, id, token, piArgs } = parseArgs(process.argv.slice(2));
+// { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
+const wsOpts = { headers: { authorization: `Bearer ${token}` } };
 
 const children = new Map(); // session name -> { child, buf, ws }
 let control = null;
@@ -63,7 +65,8 @@ function dialSession(name) {
 	const entry = children.get(name);
 	if (!entry || entry.ws) return;
 	const ws = new WebSocket(
-		`${hq}/runner-session?id=${encodeURIComponent(id)}&session=${encodeURIComponent(name)}&token=${encodeURIComponent(token)}`,
+		`${hq}/runner-session?id=${encodeURIComponent(id)}&session=${encodeURIComponent(name)}`,
+		wsOpts,
 	);
 	entry.ws = ws;
 	ws.onmessage = (ev) => entry.child.stdin.write(`${ev.data}\n`);
@@ -78,7 +81,7 @@ function dialSession(name) {
 }
 
 function connect() {
-	control = new WebSocket(`${hq}/runner?id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`);
+	control = new WebSocket(`${hq}/runner?id=${encodeURIComponent(id)}`, wsOpts);
 	control.onopen = () => {
 		console.error(`pi-runner "${id}" connected to ${hq}`);
 		for (const name of children.keys()) dialSession(name);

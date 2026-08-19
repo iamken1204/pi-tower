@@ -18,7 +18,9 @@ const runner = spawn(
 
 // wait for the runner to register
 for (let i = 0; ; i++) {
-	const list = await fetch(`http://127.0.0.1:${port}/runners?token=${TOKEN}`).then((r) => r.json());
+	const list = await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) =>
+		r.json(),
+	);
 	if (list.some((r) => r.id === "chain-test")) break;
 	assert.ok(i < 100, "runner never registered");
 	await new Promise((r) => setTimeout(r, 200));
@@ -27,7 +29,10 @@ console.log("ok runner registered");
 
 let seq = 0;
 async function attachAndGetState(session) {
-	const ws = new WebSocket(`ws://127.0.0.1:${port}/attach?runner=chain-test&session=${session}&token=${TOKEN}`);
+	const ws = new WebSocket(
+		`ws://127.0.0.1:${port}/attach?runner=chain-test&session=${session}`,
+		{ headers: { authorization: `Bearer ${TOKEN}` } },
+	);
 	await new Promise((resolve, reject) => {
 		ws.onopen = resolve;
 		ws.onclose = (ev) => reject(new Error(`attach ${session} closed: ${ev.code} ${ev.reason}`));

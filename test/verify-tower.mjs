@@ -10,7 +10,10 @@ await once(server, "listening");
 const port = server.address().port;
 
 const attach = (runner, session, token = TOKEN) =>
-	new WebSocket(`ws://127.0.0.1:${port}/attach?runner=${runner}${session ? `&session=${session}` : ""}&token=${token}`);
+	new WebSocket(
+		`ws://127.0.0.1:${port}/attach?runner=${runner}${session ? `&session=${session}` : ""}`,
+		{ headers: { authorization: `Bearer ${token}` } },
+	);
 const closed = (ws) => new Promise((r) => (ws.onclose = (ev) => r(ev)));
 const opened = (ws) => new Promise((r) => (ws.onopen = () => r(ws)));
 const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
@@ -27,7 +30,8 @@ const getState = (ws) => {
 	return reply;
 };
 const sessions = async () =>
-	(await fetch(`http://127.0.0.1:${port}/runners?token=${TOKEN}`).then((r) => r.json())).map((r) => [r.id, r.sessions]);
+	(await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${TOKEN}` } })
+		.then((r) => r.json())).map((r) => [r.id, r.sessions]);
 
 // health
 assert.equal(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text()), "pi-tower");
@@ -35,8 +39,12 @@ console.log("ok health");
 
 // auth reject on attach and /runners
 assert.equal((await closed(attach("x", "s", "wrong"))).code, 4001);
-assert.equal((await fetch(`http://127.0.0.1:${port}/runners?token=wrong`)).status, 401);
+assert.equal((await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: "Bearer wrong" } })).status, 401);
 console.log("ok auth 4001/401");
+
+// missing Authorization header also rejected
+assert.equal((await fetch(`http://127.0.0.1:${port}/runners`)).status, 401);
+console.log("ok missing auth header 401");
 
 // unknown runner names online ids
 const fake1 = await connectFakeRunner(port, TOKEN, "r1");

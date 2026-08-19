@@ -29,6 +29,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
 	const pending = new Map();
+	const authorized = (req) => req.headers.authorization === `Bearer ${token}`;
 
 	const listing = () =>
 		[...runners.entries()].map(([id, r]) => ({ id, connectedAt: r.connectedAt, sessions: r.sessions.size }));
@@ -40,7 +41,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			return;
 		}
 		if (url.pathname === "/runners") {
-			if (url.searchParams.get("token") !== token) {
+			if (!authorized(req)) {
 				res.writeHead(401).end();
 				return;
 			}
@@ -62,7 +63,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			return;
 		}
 		wss.handleUpgrade(req, socket, head, (ws) => {
-			if (url.searchParams.get("token") !== token) {
+			if (!authorized(req)) {
 				ws.close(4001, "bad token");
 				return;
 			}
