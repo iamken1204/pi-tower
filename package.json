@@ -3,6 +3,11 @@
 	"version": "0.1.0",
 	"description": "Control tower for remote pi runners: relay server, runner wrapper, and pi extension",
 	"keywords": ["pi-package"],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/iamken1204/pi-tower.git"
+	},
 	"type": "module",
 	"pi": {
 		"extensions": ["./extension.ts"],
@@ -13,9 +18,10 @@
 		"pi-runner": "./runner.mjs",
 		"pi-task": "./task.mjs"
 	},
-	"files": ["tower.mjs", "runner.mjs", "task.mjs", "lib.mjs", "extension.ts", "skills", "README.md"],
+	"files": ["tower.mjs", "runner.mjs", "task.mjs", "lib.mjs", "extension.ts", "skills", "README.md", "LICENSE"],
 	"scripts": {
-		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs"
+		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs",
+		"prepublishOnly": "npm run verify"
 	},
 	"engines": {
 		"node": ">=22"
