@@ -4,66 +4,101 @@ import { createTower } from "../tower.mjs";
 import { connectFakeRunner } from "./fake-runner.mjs";
 
 const TOKEN = "t0k";
-const server = createTower({ token: TOKEN });
+const server = createTower({ token: TOKEN, openTimeoutMs: 400 });
 server.listen(0);
 await once(server, "listening");
 const port = server.address().port;
 
-const attach = (runner, token = TOKEN) =>
-	new WebSocket(`ws://127.0.0.1:${port}/attach?runner=${runner}&token=${token}`);
+const attach = (runner, session, token = TOKEN) =>
+	new WebSocket(`ws://127.0.0.1:${port}/attach?runner=${runner}${session ? `&session=${session}` : ""}&token=${token}`);
 const closed = (ws) => new Promise((r) => (ws.onclose = (ev) => r(ev)));
 const opened = (ws) => new Promise((r) => (ws.onopen = () => r(ws)));
+const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
+let seq = 0;
+const getState = (ws) => {
+	const id = `q${++seq}`;
+	const reply = new Promise((r) => {
+		ws.onmessage = (ev) => {
+			const msg = JSON.parse(ev.data);
+			if (msg.type === "response" && msg.id === id) r(msg);
+		};
+	});
+	ws.send(JSON.stringify({ id, type: "get_state" }));
+	return reply;
+};
+const sessions = async () =>
+	(await fetch(`http://127.0.0.1:${port}/runners?token=${TOKEN}`).then((r) => r.json())).map((r) => [r.id, r.sessions]);
 
 // health
-const health = await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text());
-assert.equal(health, "pi-tower");
+assert.equal(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text()), "pi-tower");
 console.log("ok health");
 
 // auth reject on attach and /runners
-assert.equal((await closed(attach("x", "wrong"))).code, 4001);
+assert.equal((await closed(attach("x", "s", "wrong"))).code, 4001);
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners?token=wrong`)).status, 401);
 console.log("ok auth 4001/401");
 
 // unknown runner names online ids
-const runner = await connectFakeRunner(port, TOKEN, "r1");
+const fake1 = await connectFakeRunner(port, TOKEN, "r1");
 const ev404 = await closed(attach("nope"));
 assert.equal(ev404.code, 4004);
 assert.match(ev404.reason, /r1/);
 console.log("ok unknown runner 4004 lists ids");
 
-// attach + get_state roundtrip through relay
-const client = await opened(attach("r1"));
-const reply = new Promise((r) => (client.onmessage = (ev) => r(JSON.parse(ev.data))));
-client.send(JSON.stringify({ id: "q1", type: "get_state" }));
-const state = await reply;
-assert.equal(state.success, true);
-assert.equal(state.data.sessionId, "fake-1");
-console.log("ok get_state roundtrip");
+// invalid session name
+assert.equal((await closed(attach("r1", "bad%20name"))).code, 1008);
+console.log("ok invalid session name 1008");
 
-// second attach busy
-assert.equal((await closed(attach("r1"))).code, 4005);
-console.log("ok busy 4005");
+// two sessions on one runner round-trip in parallel; frames sent while pending are queued
+const [cA, cB] = await Promise.all([opened(attach("r1", "a")), opened(attach("r1", "b"))]);
+const [stateA, stateB] = await Promise.all([getState(cA), getState(cB)]);
+assert.equal(stateA.data.sessionId, "r1:a");
+assert.equal(stateB.data.sessionId, "r1:b");
+assert.deepEqual([...fake1.opens].sort(), ["a", "b"]);
+console.log("ok parallel sessions round-trip");
 
-// /runners listing
-const list = await fetch(`http://127.0.0.1:${port}/runners?token=${TOKEN}`).then((r) => r.json());
-assert.deepEqual(list.map((r) => [r.id, r.busy]), [["r1", true]]);
-console.log("ok /runners listing");
+// same-session second attach busy
+assert.equal((await closed(attach("r1", "a"))).code, 4005);
+console.log("ok same-session busy 4005");
 
-// reconnect replaces old socket, attached client survives and routes to new socket
-const runner2 = await connectFakeRunner(port, TOKEN, "r1");
-await new Promise((r) => setTimeout(r, 50)); // let old-socket close settle
-const reply2 = new Promise((r) => (client.onmessage = (ev) => r(JSON.parse(ev.data))));
-client.send(JSON.stringify({ id: "q2", type: "get_state" }));
-assert.equal((await reply2).success, true);
-console.log("ok reconnect replaces runner, client survives");
+// /runners shows session count
+assert.deepEqual(await sessions(), [["r1", 2]]);
+console.log("ok /runners session count");
 
-// runner death closes client 4006, then unknown again
-const clientClosed = closed(client);
-runner2.close();
-assert.equal((await clientClosed).code, 4006);
-assert.equal((await closed(attach("r1"))).code, 4004);
-console.log("ok runner death 4006");
+// detach + reattach pairs to the same pipe, no new open
+cA.close();
+await settle();
+const cA2 = await opened(attach("r1", "a"));
+assert.equal((await getState(cA2)).data.sessionId, "r1:a");
+assert.equal(fake1.opens.length, 2, "reattach must not re-open");
+console.log("ok reattach reuses idle session, no new open");
 
-runner.close();
+// control reconnect replaces the socket; live sessions survive
+const fake1b = await connectFakeRunner(port, TOKEN, "r1");
+await settle();
+assert.equal((await getState(cA2)).data.sessionId, "r1:a");
+assert.deepEqual(await sessions(), [["r1", 2]]);
+console.log("ok control reconnect keeps sessions");
+
+// session pipe death closes its client 4006 and drops the session
+const cA2closed = closed(cA2);
+fake1.pipes.get("a").close();
+assert.equal((await cA2closed).code, 4006);
+assert.deepEqual(await sessions(), [["r1", 1]]);
+console.log("ok session pipe death 4006");
+
+// runner offline: remaining clients 4006, then unknown
+const cBclosed = closed(cB);
+fake1b.ws.close();
+assert.equal((await cBclosed).code, 4006);
+assert.equal((await closed(attach("r1", "b"))).code, 4004);
+console.log("ok runner offline closes all 4006 then 4004");
+
+// runner that never opens the session -> 4007 after timeout
+await connectFakeRunner(port, TOKEN, "r2", { ignoreOpen: true });
+assert.equal((await closed(attach("r2", "x"))).code, 4007);
+console.log("ok open timeout 4007");
+
 server.close();
 console.log("verify-tower: all green");
+process.exit(0);
