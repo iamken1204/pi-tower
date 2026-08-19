@@ -118,4 +118,4 @@ Single shared token checked on every upgrade and HTTP request. Run the tower beh
 npm run verify
 ```
 
-Three assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), and the extension's tools plus the `pi-task` CLI driven against a fake runner.
+Four assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), the extension's tools plus the `pi-task` CLI driven against a fake runner, and pi-package loading via `pi -e .` (extension flag registered, skill listed).
