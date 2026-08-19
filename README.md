@@ -84,7 +84,11 @@ pi-task --list                    # who's online
 pi-task win-test-1 "run the failing job and report the error"
 ```
 
-stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; progress streams to stderr only in an interactive terminal, keeping piped output clean for agent callers. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner.
+stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; progress streams to stderr only in an interactive terminal, keeping piped output clean for agent callers. `--session <name>` picks the session (see below); `--fresh` resets the session's conversation first; Ctrl-C forwards an abort to the runner.
+
+## Sessions
+
+Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. Idle session processes stay alive until the runner stops (`ponytail:` an idle reaper is the upgrade path if long-lived runners accumulate too many).
 
 pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 
@@ -94,21 +98,25 @@ Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --
 
 ## Wire contract
 
-The tower is a pure relay: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions.
+Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | health, returns `pi-tower` |
-| `GET /runners?token=t` | JSON `[{id, connectedAt, busy}]` |
-| `WS /runner?id=<id>&token=t` | runner registration; same id reconnect replaces the old socket |
-| `WS /attach?runner=<id>&token=t` | client attachment, one per runner |
+| `GET /runners?token=t` | JSON `[{id, connectedAt, sessions}]` |
+| `WS /runner?id=<id>&token=t` | runner control channel; same id reconnect replaces the socket, live sessions survive |
+| `WS /runner-session?id=<id>&session=<name>&token=t` | runner-dialed data pipe, one per session |
+| `WS /attach?runner=<id>&session=<name>&token=t` | client attachment, one per session (`session` defaults to `main`) |
 
 | Close code | Meaning |
 |-----------|---------|
 | 4001 | bad token |
 | 4004 | unknown runner (reason lists online ids) |
-| 4005 | runner busy (another client attached) |
-| 4006 | runner disconnected while attached |
+| 4005 | session busy (another client attached or attaching) |
+| 4006 | session disconnected while attached |
+| 4007 | runner failed to open the session (15s timeout or runner offline) |
+
+Detaching a client leaves its session pipe idle on the tower, so a later attach with the same name resumes the conversation without a new `open`.
 
 ## Security
 

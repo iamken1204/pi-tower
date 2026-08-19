@@ -14,6 +14,6 @@ node ../../task.mjs --list                    # list runners: id, busy/idle, con
 node ../../task.mjs <runner-id> "<prompt>"    # dispatch; blocks until the remote agent finishes
 ```
 
-`pi-task` on PATH is the same tool. Connection settings come from env `PI_TOWER_URL` / `PI_TOWER_TOKEN`, or `--tower <ws(s)://url>` / `--token <t>` flags. Add `--fresh` to start a fresh session on the runner first.
+`pi-task` on PATH is the same tool. Connection settings come from env `PI_TOWER_URL` / `PI_TOWER_TOKEN`, or `--tower <ws(s)://url>` / `--token <t>` flags. `--session <name>`: tasks with the same name share conversation context on the runner, different names run in parallel (default: main). Add `--fresh` to reset the session's conversation first.
 
 stdout carries only the final answer, so `$(...)` captures cleanly (progress streams to stderr only in an interactive terminal). A failure exits non-zero with the reason on stderr (an unknown runner id lists the online ids).
