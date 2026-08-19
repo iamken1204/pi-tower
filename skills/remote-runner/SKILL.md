@@ -10,7 +10,7 @@ Remote pi agents register with a pi-tower relay; a task sent to a runner id runs
 If the `runner_task` / `runner_list` extension tools are available, use them directly. Otherwise use the bundled CLI (paths relative to this skill directory):
 
 ```bash
-node ../../task.mjs --list                    # list runners: id, busy/idle, connected time
+node ../../task.mjs --list                    # list runners: id, session count, connected time
 node ../../task.mjs <runner-id> "<prompt>"    # dispatch; blocks until the remote agent finishes
 ```
 

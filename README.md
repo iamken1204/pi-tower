@@ -20,9 +20,9 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 ┌───────────────────────────── tower (any VPS) ───────────────────────┼────────────┐
 │  process: pi-tower (tower.mjs)                                      ▼            │
 │  ┌────────────────────────────────────────────────────────────┐                  │
-│  │  registry: { "win-test-1" → runner socket, ... }           │                  │
-│  │  pure relay: client frames ──→ runner, runner ──→ client   │                  │
-│  │  one attached client per runner at a time                  │                  │
+│  │  registry: { "win-test-1" → control ws + session pipes }   │                  │
+│  │  pure relay per session pipe, client ⇄ runner untouched    │                  │
+│  │  one client per session; sessions run in parallel          │                  │
 │  └──────────────────────────────▲─────────────────────────────┘                  │
 └─────────────────────────────────┼────────────────────────────────────────────────┘
                                   │
@@ -32,10 +32,10 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 │  process: pi-runner (runner.mjs)                   │                             │
 │  ┌─────────────────────────────────────────────────┴──────────┐                  │
 │  │  pi-runner --hq wss://hq.example.com --id win-test-1       │                  │
-│  │  pipes: wss frame ↔ child stdin/stdout (LF JSONL)          │                  │
+│  │  control ws + one data ws per session (LF JSONL)           │                  │
 │  └───────────────┬────────────────────────────────────────────┘                  │
 │                  ▼                                                               │
-│  child process: pi --mode rpc   (full agent, tools run locally)                  │
+│  child processes: pi --mode rpc × N   (one per session, tools run locally)       │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
