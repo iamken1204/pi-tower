@@ -1,6 +1,9 @@
-// Drives extension.ts's tools against a real tower + fake runner, no pi process involved.
+// Drives extension.ts's tools and the pi-task CLI against a real tower + fake runner, no pi process involved.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { once } from "node:events";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { createJiti } from "jiti";
 import { createTower } from "../tower.mjs";
 import { CANNED_ANSWER, connectFakeRunner } from "./fake-runner.mjs";
@@ -44,6 +47,25 @@ await assert.rejects(
 	/unknown runner/,
 );
 console.log("ok runner_task surfaces unknown-runner close reason");
+
+const run = promisify(execFile);
+const taskBin = fileURLToPath(new URL("../task.mjs", import.meta.url));
+const env = { ...process.env, PI_TOWER_URL: `ws://127.0.0.1:${port}`, PI_TOWER_TOKEN: TOKEN };
+
+const listOut = await run("node", [taskBin, "--list"], { env });
+assert.match(listOut.stdout, /fake-1\s+idle/);
+console.log("ok pi-task --list");
+
+const taskOut = await run("node", [taskBin, "fake-1", "do it"], { env });
+assert.equal(taskOut.stdout.trim(), CANNED_ANSWER);
+assert.match(taskOut.stderr, /canned final answer/, "deltas stream to stderr");
+console.log("ok pi-task final answer on stdout, deltas on stderr");
+
+await assert.rejects(
+	run("node", [taskBin, "ghost", "x"], { env }),
+	(err) => err.code === 1 && /unknown runner/.test(err.stderr),
+);
+console.log("ok pi-task unknown runner exits 1 with reason");
 
 runner.close();
 server.close();

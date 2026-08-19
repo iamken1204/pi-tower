@@ -5,9 +5,10 @@
 	"type": "module",
 	"bin": {
 		"pi-tower": "./tower.mjs",
-		"pi-runner": "./runner.mjs"
+		"pi-runner": "./runner.mjs",
+		"pi-task": "./task.mjs"
 	},
-	"files": ["tower.mjs", "runner.mjs", "extension.ts", "README.md"],
+	"files": ["tower.mjs", "runner.mjs", "task.mjs", "lib.mjs", "extension.ts", "README.md"],
 	"scripts": {
 		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs"
 	},
