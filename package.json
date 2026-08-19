@@ -15,7 +15,7 @@
 	},
 	"files": ["tower.mjs", "runner.mjs", "task.mjs", "lib.mjs", "extension.ts", "skills", "README.md"],
 	"scripts": {
-		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs"
+		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs"
 	},
 	"engines": {
 		"node": ">=22"
