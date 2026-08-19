@@ -58,8 +58,8 @@ console.log("ok pi-task --list");
 
 const taskOut = await run("node", [taskBin, "fake-1", "do it"], { env });
 assert.equal(taskOut.stdout.trim(), CANNED_ANSWER);
-assert.match(taskOut.stderr, /canned final answer/, "deltas stream to stderr");
-console.log("ok pi-task final answer on stdout, deltas on stderr");
+assert.equal(taskOut.stderr, "", "piped stderr stays clean (deltas are TTY-only)");
+console.log("ok pi-task final answer on stdout, piped stderr clean");
 
 await assert.rejects(
 	run("node", [taskBin, "ghost", "x"], { env }),

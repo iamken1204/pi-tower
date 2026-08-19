@@ -82,7 +82,7 @@ pi-task --list                    # who's online
 pi-task win-test-1 "run the failing job and report the error"
 ```
 
-Progress streams to stderr; stdout carries only the final answer, so `$(pi-task ...)` captures cleanly. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner.
+stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; progress streams to stderr only in an interactive terminal, keeping piped output clean for agent callers. `--fresh` starts a fresh session on the runner first; Ctrl-C forwards an abort to the runner.
 
 pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 

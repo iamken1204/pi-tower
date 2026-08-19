@@ -54,9 +54,10 @@ try {
 			prompt: rest[1],
 			fresh,
 			signal: ctl.signal,
-			onDelta: (delta) => process.stderr.write(delta),
+			// deltas only for humans; piped stderr (agent callers) gets just the failure reason
+			onDelta: process.stderr.isTTY ? (delta) => process.stderr.write(delta) : undefined,
 		});
-		process.stderr.write("\n");
+		if (process.stderr.isTTY) process.stderr.write("\n");
 		console.log(text);
 	}
 	process.exit(0);
