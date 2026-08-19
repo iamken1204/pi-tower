@@ -9,14 +9,16 @@ export async function listRunners(tower, token) {
 }
 
 export function formatRunners(runners) {
+	const count = (n) => (n === 0 ? "idle" : `${n} session${n === 1 ? "" : "s"}`);
 	return runners.length
-		? runners.map((r) => `${r.id}  ${r.busy ? "busy" : "idle"}  connected ${r.connectedAt}`).join("\n")
+		? runners.map((r) => `${r.id}  ${count(r.sessions)}  connected ${r.connectedAt}`).join("\n")
 		: "no runners online";
 }
 
-export async function runTask({ tower, token, runnerId, prompt, fresh, signal, onDelta }) {
+export async function runTask({ tower, token, runnerId, session, prompt, fresh, signal, onDelta }) {
 	const ws = new WebSocket(
-		`${tower}/attach?runner=${encodeURIComponent(runnerId)}&token=${encodeURIComponent(token)}`,
+		`${tower}/attach?runner=${encodeURIComponent(runnerId)}&token=${encodeURIComponent(token)}` +
+			(session ? `&session=${encodeURIComponent(session)}` : ""),
 	);
 	const send = (obj) => ws.send(JSON.stringify(obj));
 

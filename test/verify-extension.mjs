@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createJiti } from "jiti";
 import { createTower } from "../tower.mjs";
-import { CANNED_ANSWER, connectFakeRunner } from "./fake-runner.mjs";
+import { CANNED_ANSWER, cannedAnswer, connectFakeRunner } from "./fake-runner.mjs";
 
 const TOKEN = "t0k";
 const server = createTower({ token: TOKEN });
@@ -48,18 +48,31 @@ await assert.rejects(
 );
 console.log("ok runner_task surfaces unknown-runner close reason");
 
+// two named sessions in parallel, each answer tagged with its session
+const [r1, r2] = await Promise.all([
+	tools.get("runner_task").execute("tc3", { runner_id: "fake-1", prompt: "p", session: "s1" }, undefined, undefined),
+	tools.get("runner_task").execute("tc4", { runner_id: "fake-1", prompt: "p", session: "s2" }, undefined, undefined),
+]);
+assert.equal(r1.content[0].text, cannedAnswer("s1"));
+assert.equal(r2.content[0].text, cannedAnswer("s2"));
+console.log("ok parallel runner_task sessions route independently");
+
 const run = promisify(execFile);
 const taskBin = fileURLToPath(new URL("../task.mjs", import.meta.url));
 const env = { ...process.env, PI_TOWER_URL: `ws://127.0.0.1:${port}`, PI_TOWER_TOKEN: TOKEN };
 
 const listOut = await run("node", [taskBin, "--list"], { env });
-assert.match(listOut.stdout, /fake-1\s+idle/);
-console.log("ok pi-task --list");
+assert.match(listOut.stdout, /fake-1\s+3 sessions/);
+console.log("ok pi-task --list with session count");
 
 const taskOut = await run("node", [taskBin, "fake-1", "do it"], { env });
 assert.equal(taskOut.stdout.trim(), CANNED_ANSWER);
 assert.equal(taskOut.stderr, "", "piped stderr stays clean (deltas are TTY-only)");
 console.log("ok pi-task final answer on stdout, piped stderr clean");
+
+const sessOut = await run("node", [taskBin, "--session", "s3", "fake-1", "do it"], { env });
+assert.equal(sessOut.stdout.trim(), cannedAnswer("s3"));
+console.log("ok pi-task --session routes to the named session");
 
 await assert.rejects(
 	run("node", [taskBin, "ghost", "x"], { env }),

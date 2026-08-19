@@ -15,7 +15,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "runner_list",
 		label: "Runner list",
-		description: "List remote pi runners registered with the tower and whether each is busy.",
+		description: "List remote pi runners registered with the tower and how many sessions each is running.",
 		parameters: Type.Object({}),
 		async execute() {
 			const text = formatRunners(await listRunners(tower, token));
@@ -31,7 +31,14 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			runner_id: Type.String({ description: "Runner id as shown by runner_list" }),
 			prompt: Type.String({ description: "Task for the remote agent" }),
-			fresh: Type.Optional(Type.Boolean({ description: "Start a fresh session on the runner first" })),
+			session: Type.Optional(
+				Type.String({
+					pattern: "^[A-Za-z0-9._-]{1,64}$",
+					description:
+						"Session name on the runner (default: main). Same name shares conversation context across tasks; different names run in parallel.",
+				}),
+			),
+			fresh: Type.Optional(Type.Boolean({ description: "Reset the session's conversation first" })),
 		}),
 		async execute(_toolCallId, params, signal, onUpdate) {
 			let transcript = "";
@@ -39,6 +46,7 @@ export default function (pi: ExtensionAPI) {
 				tower,
 				token,
 				runnerId: params.runner_id,
+				session: params.session,
 				prompt: params.prompt,
 				fresh: params.fresh,
 				signal,
