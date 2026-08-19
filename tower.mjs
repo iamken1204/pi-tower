@@ -163,7 +163,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			runner.ws.send(JSON.stringify({ type: "open", session: name }));
 			pending.set(key, {
 				client: ws,
-				queue: [], // ponytail: unbounded while opening; a prompt is a handful of frames
+				queue: [], // Frames wait here for at most openTimeoutMs while the runner opens the session.
 				timer: setTimeout(() => failPending(key, 4007, "runner failed to open session"), openTimeoutMs),
 			});
 		}

@@ -68,11 +68,12 @@ Args after `--` go to the spawned `pi --mode rpc`. The runner dials out and reco
 
 **Interactive side** (wherever you drive pi from)
 
-pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` tools) and the `remote-runner` skill. Install once:
+pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` tools) and the `remote-runner` skill. Install it from npm or GitHub, or try a local checkout without installing:
 
 ```sh
-pi install git:github.com/<you>/pi-tower   # or npm:pi-tower, or /local/path
-pi -e /local/path                          # try without installing (this run only)
+pi install npm:pi-tower
+pi install git:github.com/iamken1204/pi-tower
+pi -e /local/path
 ```
 
 Then start pi with the tower flags and prompt "use runner_task on win-test-1 to ...":
@@ -97,7 +98,7 @@ stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; prog
 
 ## Sessions
 
-Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. Idle session processes stay alive until the runner stops (`ponytail:` an idle reaper is the upgrade path if long-lived runners accumulate too many).
+Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. Idle session processes stay alive until the runner stops.
 
 pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 

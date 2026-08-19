@@ -31,7 +31,7 @@ const { hq, id, token, piArgs } = parseArgs(process.argv.slice(2));
 const children = new Map(); // session name -> { child, buf, ws }
 let control = null;
 
-// ponytail: idle children live until the runner stops; an idle reaper is the upgrade path
+// Keep idle children alive so detaching and reattaching preserves session context.
 function ensureSession(name) {
 	let entry = children.get(name);
 	if (!entry) {
