@@ -64,7 +64,7 @@ In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower
 npx pi-runner --hq wss://hq.example.com --id win-test-1 --token <shared-token> -- --no-session
 ```
 
-Args after `--` go to the spawned `pi --mode rpc`. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
+Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
 **Interactive side** (wherever you drive pi from)
 
