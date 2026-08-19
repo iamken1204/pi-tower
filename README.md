@@ -72,8 +72,8 @@ pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` t
 
 ```sh
 pi install npm:pi-tower
-pi install git:github.com/iamken1204/pi-tower
-pi -e /local/path
+pi install git:github.com/iamken1204/pi-tower  # or from GitHub
+pi -e /local/path                              # or try a local checkout (this run only)
 ```
 
 Then start pi with the tower flags and prompt "use runner_task on win-test-1 to ...":
