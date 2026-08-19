@@ -4,3 +4,4 @@ assets
 skills
 *.md
 .git
+.env
