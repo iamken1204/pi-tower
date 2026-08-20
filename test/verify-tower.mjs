@@ -32,6 +32,10 @@ const getState = (ws) => {
 const sessions = async () =>
 	(await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${TOKEN}` } })
 		.then((r) => r.json())).map((r) => [r.id, r.sessions]);
+const runners = () =>
+	fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
+const apiState = () =>
+	fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
 
 // health
 assert.equal(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text()), "pi-tower");
@@ -40,11 +44,19 @@ console.log("ok health");
 // auth reject on attach and /runners
 assert.equal((await closed(attach("x", "s", "wrong"))).code, 4001);
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: "Bearer wrong" } })).status, 401);
+assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: "Bearer wrong" } })).status, 401);
 console.log("ok auth 4001/401");
 
 // missing Authorization header also rejected
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners`)).status, 401);
+assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`)).status, 401);
 console.log("ok missing auth header 401");
+
+const uiResponse = await fetch(`http://127.0.0.1:${port}/ui/`);
+assert.equal(uiResponse.status, 200);
+assert.match(uiResponse.headers.get("content-type"), /^text\/html;\s*charset=utf-8$/i);
+assert.match(await uiResponse.text(), /pi-tower state/i);
+console.log("ok public UI shell");
 
 // unknown runner names online ids
 const fake1 = await connectFakeRunner(port, TOKEN, "r1");
@@ -71,11 +83,19 @@ console.log("ok same-session busy 4005");
 
 // /runners shows session count
 assert.deepEqual(await sessions(), [["r1", 2]]);
+for (const runner of await runners()) {
+	assert.deepEqual(Object.keys(runner), ["id", "connectedAt", "sessions"]);
+	assert.equal(typeof runner.sessions, "number");
+}
 console.log("ok /runners session count");
 
 // detach + reattach pairs to the same pipe, no new open
 cA.close();
 await settle();
+assert.deepEqual((await apiState()).runners[0].sessions.toSorted((a, b) => a.name.localeCompare(b.name)), [
+	{ name: "a", state: "idle" },
+	{ name: "b", state: "attached" },
+]);
 const cA2 = await opened(attach("r1", "a"));
 assert.equal((await getState(cA2)).data.sessionId, "r1:a");
 assert.equal(fake1.opens.length, 2, "reattach must not re-open");
@@ -103,8 +123,13 @@ assert.equal((await closed(attach("r1", "b"))).code, 4004);
 console.log("ok runner offline closes all 4006 then 4004");
 
 // runner that never opens the session -> 4007 after timeout
-await connectFakeRunner(port, TOKEN, "r2", { ignoreOpen: true });
-assert.equal((await closed(attach("r2", "x"))).code, 4007);
+const fake2 = await connectFakeRunner(port, TOKEN, "r2", { ignoreOpen: true });
+const pendingClient = await opened(attach("r2", "x"));
+const pendingClosed = closed(pendingClient);
+assert.deepEqual(await sessions(), [["r2", 0]]);
+assert.deepEqual((await apiState()).runners[0].sessions, [{ name: "x", state: "opening" }]);
+assert.equal((await pendingClosed).code, 4007);
+fake2.close();
 console.log("ok open timeout 4007");
 
 server.close();

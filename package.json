@@ -30,6 +30,7 @@
 		"task.mjs",
 		"lib.mjs",
 		"extension.ts",
+		"ui.html",
 		"skills",
 		"README.md",
 		"LICENSE"

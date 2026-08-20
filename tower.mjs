@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // pi-tower: relays RPC JSONL frames between clients and per-session pi processes on registered runners.
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const UI_HTML = readFileSync(new URL("./ui.html", import.meta.url));
 
 function parseArgs(argv) {
 	const opts = { port: 9000, token: process.env.PI_TOWER_TOKEN };
@@ -33,6 +34,21 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 
 	const listing = () =>
 		[...runners.entries()].map(([id, r]) => ({ id, connectedAt: r.connectedAt, sessions: r.sessions.size }));
+	const snapshot = () => ({
+		runners: [...runners.entries()].map(([id, runner]) => ({
+			id,
+			connectedAt: runner.connectedAt,
+			sessions: [
+				...[...runner.sessions.entries()].map(([name, session]) => ({
+					name,
+					state: session.client ? "attached" : "idle",
+				})),
+				...[...pending.keys()]
+					.filter((key) => key.startsWith(`${id}/`))
+					.map((key) => ({ name: key.slice(id.length + 1), state: "opening" })),
+			],
+		})),
+	});
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
@@ -47,6 +63,21 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			}
 			res.setHeader("content-type", "application/json");
 			res.end(JSON.stringify(listing()));
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/api/state") {
+			if (!authorized(req)) {
+				res.writeHead(401).end();
+				return;
+			}
+			res.setHeader("content-type", "application/json");
+			res.setHeader("cache-control", "no-store");
+			res.end(JSON.stringify(snapshot()));
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/ui/") {
+			res.setHeader("content-type", "text/html; charset=utf-8");
+			res.end(UI_HTML);
 			return;
 		}
 		res.writeHead(404).end();

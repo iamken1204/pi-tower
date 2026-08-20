@@ -58,6 +58,8 @@ docker compose up -d
 
 In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower:9000`; the tower URL everywhere else is then `wss://<that-hostname>`.
 
+Open `https://<that-hostname>/ui/` and enter the shared token to view live runner and session state. The token stays in memory and the page polls while it is authorized.
+
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh
@@ -110,11 +112,13 @@ Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --
 
 Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
-Every HTTP request and WebSocket upgrade authenticates with an `Authorization: Bearer <token>` header. The tower pings every connection every 30s and terminates peers that miss two pings.
+The public UI shell and health response expose no runner state. Protected API requests and every WebSocket upgrade authenticate with an `Authorization: Bearer <token>` header. The tower pings every connection every 30s and terminates peers that miss two pings.
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | health, returns `pi-tower` |
+| `GET /ui/` | public HTML state viewer shell |
+| `GET /api/state` | protected JSON runner and session state |
 | `GET /runners` | JSON `[{id, connectedAt, sessions}]` |
 | `WS /runner?id=<id>` | runner control channel; same id reconnect replaces the socket, live sessions survive |
 | `WS /runner-session?id=<id>&session=<name>` | runner-dialed data pipe, one per session |
