@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+node_version="22.23.2"
+node_dir="$HOME/.local/node-v$node_version"
+
+echo "==> Ensuring Node.js $node_version"
+if [[ ! -x "$node_dir/bin/node" ]]; then
+	tmp_dir="$(mktemp -d)"
+	trap 'rm -rf "$tmp_dir"' EXIT
+	archive="node-v$node_version-linux-x64.tar.xz"
+	curl -fsSL "https://nodejs.org/dist/v$node_version/$archive" -o "$tmp_dir/$archive"
+	echo "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  $tmp_dir/$archive" | sha256sum --check --status
+	mkdir -p "$node_dir"
+	tar -xJf "$tmp_dir/$archive" --strip-components=1 -C "$node_dir"
+fi
+
+mkdir -p "$HOME/.local/bin"
+for command in node npm npx corepack; do
+	ln -sfn "$node_dir/bin/$command" "$HOME/.local/bin/$command"
+done
+export PATH="$HOME/.local/bin:$PATH"
+
+echo "==> Installing locked project dependencies"
+cd "$repo_root"
+npm ci --no-audit --no-fund
+
+echo "==> Ensuring the pi CLI"
+pi_prefix="$HOME/.local/share/pi-tower"
+pi_version="0.84.2"
+if [[ ! -x "$pi_prefix/node_modules/.bin/pi" ]] || \
+	[[ "$(node -p "try { require('$pi_prefix/node_modules/@earendil-works/pi-coding-agent/package.json').version } catch { '' }")" != "$pi_version" ]]; then
+	npm install --prefix "$pi_prefix" --no-audit --no-fund "@earendil-works/pi-coding-agent@$pi_version"
+fi
+ln -sfn "$pi_prefix/node_modules/.bin/pi" "$HOME/.local/bin/pi"
+
+echo "==> Orb setup complete"
