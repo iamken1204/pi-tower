@@ -2,6 +2,9 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createJiti } from "jiti";
@@ -64,6 +67,22 @@ const env = { ...process.env, PI_TOWER_URL: `ws://127.0.0.1:${port}`, PI_TOWER_T
 const listOut = await run("node", [taskBin, "--list"], { env });
 assert.match(listOut.stdout, /fake-1\s+3 sessions/);
 console.log("ok pi-task --list with session count");
+
+const tokenDir = await mkdtemp(join(tmpdir(), "pi-tower-"));
+const tokenPath = join(tokenDir, "token");
+try {
+	await writeFile(tokenPath, `${TOKEN}\n`);
+	const tokenFileEnv = { ...process.env, PI_TOWER_URL: `ws://127.0.0.1:${port}`, PI_TOWER_TOKEN_FILE: tokenPath };
+	delete tokenFileEnv.PI_TOWER_TOKEN;
+	assert.match((await run("node", [taskBin, "--list"], { env: tokenFileEnv })).stdout, /fake-1\s+3 sessions/);
+	assert.match(
+		(await run("node", [taskBin, "--token-file", tokenPath, "--list"], { env: { ...env, PI_TOWER_TOKEN: "wrong" } })).stdout,
+		/fake-1\s+3 sessions/,
+	);
+} finally {
+	await rm(tokenDir, { recursive: true, force: true });
+}
+console.log("ok pi-task reads token from flag and environment file");
 
 const taskOut = await run("node", [taskBin, "fake-1", "do it"], { env });
 assert.equal(taskOut.stdout.trim(), CANNED_ANSWER);

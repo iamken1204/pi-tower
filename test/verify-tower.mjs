@@ -55,8 +55,43 @@ console.log("ok missing auth header 401");
 const uiResponse = await fetch(`http://127.0.0.1:${port}/ui/`);
 assert.equal(uiResponse.status, 200);
 assert.match(uiResponse.headers.get("content-type"), /^text\/html;\s*charset=utf-8$/i);
-assert.match(await uiResponse.text(), /pi-tower state/i);
-console.log("ok public UI shell");
+const uiHtml = await uiResponse.text();
+assert.match(uiHtml, /pi-tower state/i);
+assert.match(uiHtml, /<form[^>]+method="post"[^>]+action="\/api\/session"/i);
+assert.doesNotMatch(uiHtml, /Authorization:\s*`Bearer/);
+console.log("ok public UI shell uses session login");
+
+const loginResponse = await fetch(`http://127.0.0.1:${port}/api/session`, {
+	method: "POST",
+	headers: { "content-type": "application/x-www-form-urlencoded" },
+	body: new URLSearchParams({ token: TOKEN }),
+	redirect: "manual",
+});
+assert.equal(loginResponse.status, 303);
+assert.equal(loginResponse.headers.get("location"), "/ui/");
+const setCookie = loginResponse.headers.get("set-cookie");
+assert.match(setCookie, /^pi_tower_ui_session=[^;]+; Path=\/api; HttpOnly; SameSite=Strict; Max-Age=2592000$/);
+const sessionCookie = setCookie.split(";", 1)[0];
+assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: sessionCookie } })).status, 200);
+assert.equal((await fetch(`http://127.0.0.1:${port}/runners`, { headers: { cookie: sessionCookie } })).status, 401);
+console.log("ok UI session cookie authorizes only UI state");
+
+const tamperedCookie = `${sessionCookie.slice(0, -1)}${sessionCookie.endsWith("x") ? "y" : "x"}`;
+const tamperedResponse = await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: tamperedCookie } });
+assert.equal(tamperedResponse.status, 401);
+assert.match(tamperedResponse.headers.get("set-cookie"), /Max-Age=0/);
+console.log("ok tampered UI session rejected and cleared");
+
+const failedLogin = await fetch(`http://127.0.0.1:${port}/api/session`, {
+	method: "POST",
+	headers: { cookie: sessionCookie, "content-type": "application/x-www-form-urlencoded" },
+	body: new URLSearchParams({ token: "wrong" }),
+	redirect: "manual",
+});
+assert.equal(failedLogin.status, 303);
+assert.equal(failedLogin.headers.get("location"), "/ui/?auth=failed");
+assert.match(failedLogin.headers.get("set-cookie"), /Max-Age=0/);
+console.log("ok failed UI login redirects and clears prior session");
 
 // unknown runner names online ids
 const fake1 = await connectFakeRunner(port, TOKEN, "r1");

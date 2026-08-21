@@ -2,25 +2,47 @@
 // pi-runner: registers with a pi-tower and runs one `pi --mode rpc` child per opened session.
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
+import { readTokenFile } from "./lib.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 function parseArgs(argv) {
-	const opts = { hq: undefined, id: hostname(), token: process.env.PI_TOWER_TOKEN, piArgs: [] };
+	const opts = {
+		hq: undefined,
+		id: hostname(),
+		token: process.env.PI_TOWER_TOKEN,
+		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
+		piArgs: [],
+	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--hq") opts.hq = argv[++i];
 		else if (argv[i] === "--id") opts.id = argv[++i];
-		else if (argv[i] === "--token") opts.token = argv[++i];
-		else if (argv[i] === "--") {
+		else if (argv[i] === "--token") {
+			opts.token = argv[++i];
+			opts.tokenFile = undefined;
+		} else if (argv[i] === "--token-file") {
+			opts.tokenFile = argv[++i];
+			opts.token = undefined;
+		} else if (argv[i] === "--") {
 			opts.piArgs = argv.slice(i + 1);
 			break;
 		} else {
-			console.error(`unknown option ${argv[i]}\nusage: pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t] [-- <pi args>]`);
+			console.error(
+				`unknown option ${argv[i]}\nusage: pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path] [-- <pi args>]`,
+			);
+			process.exit(1);
+		}
+	}
+	if (opts.tokenFile) {
+		try {
+			opts.token = readTokenFile(opts.tokenFile);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
 			process.exit(1);
 		}
 	}
 	if (!opts.hq || !opts.token) {
-		console.error("missing --hq or token (--token / PI_TOWER_TOKEN)");
+		console.error("missing --hq or token (--token / --token-file / PI_TOWER_TOKEN / PI_TOWER_TOKEN_FILE)");
 		process.exit(1);
 	}
 	return opts;

@@ -46,7 +46,7 @@ Three roles, each runnable on any machine (even all three on one box); the runne
 **Tower** (any host the runner and interactive sides can both reach)
 
 ```sh
-npx pi-tower --port 9000 --token <shared-token>   # or PI_TOWER_TOKEN env
+npx pi-tower --port 9000 --token <shared-token>   # or --token-file /path/to/token
 ```
 
 Or with Docker plus a Cloudflare Tunnel (no exposed port, TLS terminates at the edge):
@@ -58,15 +58,15 @@ docker compose up -d
 
 In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower:9000`; the tower URL everywhere else is then `wss://<that-hostname>`.
 
-Open `https://<that-hostname>/ui/` and enter the shared token to view live runner and session state. The token stays in memory and the page polls while it is authorized.
+Open `https://<that-hostname>/ui/` and enter the shared token to view live runner and session state. The tower exchanges it for a signed, HTTP-only session cookie valid for 30 days; the raw token is not retained by the page.
 
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh
-npx pi-runner --hq wss://hq.example.com --id win-test-1 --token <shared-token> -- --no-session
+npx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/token -- --no-session
 ```
 
-Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
+The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
 **Interactive side** (wherever you drive pi from)
 
@@ -105,19 +105,20 @@ Each runner runs one `pi --mode rpc` process per session, so different sessions 
 pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 
 ```md
-Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL, PI_TOWER_TOKEN).
+Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL and PI_TOWER_TOKEN or PI_TOWER_TOKEN_FILE).
 ```
 
 ## Wire contract
 
 Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
-The public UI shell and health response expose no runner state. Protected API requests and every WebSocket upgrade authenticate with an `Authorization: Bearer <token>` header. The tower pings every connection every 30s and terminates peers that miss two pings.
+The public UI shell and health response expose no runner state. CLI requests and every WebSocket upgrade authenticate with an `Authorization: Bearer <token>` header. The UI exchanges the token for an HMAC-signed, HTTP-only cookie scoped to `/api`; `/api/state` accepts either form of authentication. The tower pings every connection every 30s and terminates peers that miss two pings.
 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | health, returns `pi-tower` |
 | `GET /ui/` | public HTML state viewer shell |
+| `POST /api/session` | validate a UI token, set the signed session cookie, and redirect |
 | `GET /api/state` | protected JSON runner and session state |
 | `GET /runners` | JSON `[{id, connectedAt, sessions}]` |
 | `WS /runner?id=<id>` | runner control channel; same id reconnect replaces the socket, live sessions survive |

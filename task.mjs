@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // pi-task: dispatch a prompt to a remote pi runner via a tower; final answer on stdout.
-import { formatRunners, listRunners, runTask } from "./lib.mjs";
+import { formatRunners, listRunners, readTokenFile, runTask } from "./lib.mjs";
 
-const usage = `usage: pi-task [--tower <ws(s)://url>] [--token <t>] [--session <name>] [--fresh] <runner-id> "<prompt>"
+const usage = `usage: pi-task [--tower <ws(s)://url>] [--token <t> | --token-file <path>] [--session <name>] [--fresh] <runner-id> "<prompt>"
        pi-task --list
-env fallbacks: PI_TOWER_URL, PI_TOWER_TOKEN
+env fallbacks: PI_TOWER_URL, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE
 quickstart:
   pi-task --list                    # who's online
   pi-task win-test-1 "run the failing job and report the error"
@@ -20,6 +20,7 @@ function parseArgs(argv) {
 	const opts = {
 		tower: process.env.PI_TOWER_URL,
 		token: process.env.PI_TOWER_TOKEN,
+		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
 		session: undefined,
 		fresh: false,
 		list: false,
@@ -27,8 +28,13 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--tower") opts.tower = argv[++i];
-		else if (argv[i] === "--token") opts.token = argv[++i];
-		else if (argv[i] === "--session") opts.session = argv[++i];
+		else if (argv[i] === "--token") {
+			opts.token = argv[++i];
+			opts.tokenFile = undefined;
+		} else if (argv[i] === "--token-file") {
+			opts.tokenFile = argv[++i];
+			opts.token = undefined;
+		} else if (argv[i] === "--session") opts.session = argv[++i];
 		else if (argv[i] === "--fresh") opts.fresh = true;
 		else if (argv[i] === "--list") opts.list = true;
 		else if (argv[i] === "--help" || argv[i] === "-h") {
@@ -36,6 +42,13 @@ function parseArgs(argv) {
 			process.exit(0);
 		} else if (argv[i].startsWith("--")) fail(`unknown option ${argv[i]}`);
 		else opts.rest.push(argv[i]);
+	}
+	if (opts.tokenFile) {
+		try {
+			opts.token = readTokenFile(opts.tokenFile);
+		} catch (error) {
+			fail(error instanceof Error ? error.message : String(error));
+		}
 	}
 	return opts;
 }

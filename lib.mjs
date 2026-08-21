@@ -1,6 +1,13 @@
 // Shared tower client: attach → prompt → settle → final-text flow, used by extension.ts and task.mjs.
+import { readFileSync } from "node:fs";
 
 const httpFromWs = (url) => url.replace(/^ws/, "http");
+
+export function readTokenFile(path) {
+	const token = readFileSync(path, "utf8").replace(/\r?\n$/, "");
+	if (!token) throw new Error(`token file is empty: ${path}`);
+	return token;
+}
 
 export async function listRunners(tower, token) {
 	const res = await fetch(`${httpFromWs(tower)}/runners`, { headers: { authorization: `Bearer ${token}` } });

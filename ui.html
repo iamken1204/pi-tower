@@ -505,6 +505,7 @@
 			color: #fff;
 		}
 
+		.runner-index .eyebrow { color: #fff; }
 		.runner-index strong { font-size: 1.7rem; line-height: 1; }
 
 		.runner-identity {
@@ -776,14 +777,14 @@
 						<span class="connection-indicator" id="connection-indicator">Not connected</span>
 					</summary>
 					<div class="connection-popover">
-						<form class="auth-form" id="auth-form">
+						<form class="auth-form" id="auth-form" method="post" action="/api/session">
 							<div class="field">
 								<label for="token">Access token</label>
 								<input id="token" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="Enter tower token">
 							</div>
 							<button class="primary-button" type="submit">Connect</button>
 						</form>
-						<p class="auth-note" id="connection-summary">Token stays only in this page's memory.</p>
+						<p class="auth-note" id="connection-summary">Sign in once on this device.</p>
 					</div>
 				</details>
 				<div class="header-clock">
@@ -867,7 +868,7 @@
 			attached: document.querySelector("#attached-count"),
 			opening: document.querySelector("#opening-count"),
 		};
-		let token = "";
+		const authFailed = new URLSearchParams(location.search).get("auth") === "failed";
 		let timer;
 		let pollId = 0;
 		let latestData = { runners: [] };
@@ -1185,22 +1186,25 @@
 
 		async function poll(id) {
 			try {
-				const response = await fetch("/api/state", {
-					headers: { Authorization: `Bearer ${token}` },
-					cache: "no-store",
-				});
+				const response = await fetch("/api/state", { cache: "no-store", credentials: "same-origin" });
 				if (id !== pollId) return;
 				if (response.status === 401) {
-					token = "";
+					const sessionExpired = document.body.dataset.authenticated === "true";
 					document.body.dataset.authenticated = "false";
 					setConnection("disconnected");
 					setCounts();
 					filterInput.disabled = true;
 					refreshButton.disabled = true;
-					setStatus("That token was not accepted. Check it and try again.", "error");
+					if (authFailed) setStatus("That token was not accepted. Check it and try again.", "error");
+					else if (sessionExpired) setStatus("Your session expired. Enter the tower token to reconnect.", "error");
+					else setStatus("Enter the tower token to load network state.");
 					pollingNote.textContent = "Automatic refresh is off";
 					resultsNote.textContent = "Connect to view available runners.";
-					renderEmpty("Access denied", "Enter the tower's configured access token and try again.", "E–401");
+					renderEmpty(
+						authFailed ? "Access denied" : "Authentication required",
+						"Enter the tower's configured access token to view runners and sessions.",
+						authFailed ? "E–401" : "R–000",
+					);
 					authDetails.open = true;
 					input.focus();
 					return;
@@ -1222,19 +1226,15 @@
 				setStatus(error instanceof Error ? error.message : "Unable to read network state.", "error");
 				pollingNote.textContent = "Retrying automatically";
 			}
-			if (token) timer = setTimeout(() => poll(id), 2000);
+			timer = setTimeout(() => poll(id), 2000);
 		}
 
-		form.addEventListener("submit", (event) => {
-			event.preventDefault();
+		form.addEventListener("submit", () => {
 			clearTimeout(timer);
-			const id = ++pollId;
-			token = input.value;
-			input.value = "";
+			++pollId;
 			setConnection("connecting");
 			setStatus("Checking the token and loading network state…");
 			pollingNote.textContent = "Connecting";
-			poll(id);
 		});
 
 		document.addEventListener("pointerdown", (event) => {
@@ -1250,7 +1250,7 @@
 		filterInput.addEventListener("input", () => renderDirectory(latestData));
 
 		refreshButton.addEventListener("click", () => {
-			if (!token) return;
+			if (document.body.dataset.authenticated !== "true") return;
 			clearTimeout(timer);
 			const id = ++pollId;
 			setStatus("Refreshing network state…");
@@ -1266,6 +1266,11 @@
 		};
 		updateClock();
 		setInterval(updateClock, 1000);
+
+		setConnection("connecting");
+		setStatus(authFailed ? "Confirming sign-in failure…" : "Restoring your session…");
+		pollingNote.textContent = "Connecting";
+		poll(++pollId);
 	</script>
 </body>
 </html>

@@ -1,25 +1,46 @@
 #!/usr/bin/env node
 // pi-tower: relays RPC JSONL frames between clients and per-session pi processes on registered runners.
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
+import { readTokenFile } from "./lib.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const UI_HTML = readFileSync(new URL("./ui.html", import.meta.url));
+const UI_SESSION_COOKIE = "pi_tower_ui_session";
+const UI_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 function parseArgs(argv) {
-	const opts = { port: 9000, token: process.env.PI_TOWER_TOKEN };
+	const opts = {
+		port: 9000,
+		token: process.env.PI_TOWER_TOKEN,
+		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
+	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--port") opts.port = Number(argv[++i]);
-		else if (argv[i] === "--token") opts.token = argv[++i];
-		else {
-			console.error(`unknown option ${argv[i]}\nusage: pi-tower [--port 9000] [--token t]`);
+		else if (argv[i] === "--token") {
+			opts.token = argv[++i];
+			opts.tokenFile = undefined;
+		} else if (argv[i] === "--token-file") {
+			opts.tokenFile = argv[++i];
+			opts.token = undefined;
+		} else {
+			console.error(`unknown option ${argv[i]}\nusage: pi-tower [--port 9000] [--token t | --token-file path]`);
+			process.exit(1);
+		}
+	}
+	if (opts.tokenFile) {
+		try {
+			opts.token = readTokenFile(opts.tokenFile);
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : String(error));
 			process.exit(1);
 		}
 	}
 	if (!opts.token) {
-		console.error("missing token: pass --token or set PI_TOWER_TOKEN");
+		console.error("missing token: pass --token, --token-file, or set PI_TOWER_TOKEN / PI_TOWER_TOKEN_FILE");
 		process.exit(1);
 	}
 	return opts;
@@ -30,7 +51,38 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
 	const pending = new Map();
-	const authorized = (req) => req.headers.authorization === `Bearer ${token}`;
+	const bearerAuthorized = (req) => req.headers.authorization === `Bearer ${token}`;
+	const signUiSession = (payload) => createHmac("sha256", token).update(payload).digest("base64url");
+	const issueUiSession = () => {
+		const payload = `${Date.now() + UI_SESSION_TTL_SECONDS * 1000}.${randomBytes(18).toString("base64url")}`;
+		return `${payload}.${signUiSession(payload)}`;
+	};
+	const uiSessionCookie = (req) => {
+		const prefix = `${UI_SESSION_COOKIE}=`;
+		return req.headers.cookie
+			?.split(";")
+			.map((part) => part.trim())
+			.find((part) => part.startsWith(prefix))
+			?.slice(prefix.length);
+	};
+	const uiSessionAuthorized = (req) => {
+		const value = uiSessionCookie(req);
+		if (!value) return false;
+		const [expires, nonce, signature, ...extra] = value.split(".");
+		if (extra.length || !expires || !nonce || !signature || Number(expires) <= Date.now()) return false;
+		const expected = Buffer.from(signUiSession(`${expires}.${nonce}`));
+		const supplied = Buffer.from(signature);
+		return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+	};
+	const uiAuthorized = (req) => bearerAuthorized(req) || uiSessionAuthorized(req);
+	const secureRequest = (req) =>
+		req.socket.encrypted === true || req.headers["x-forwarded-proto"]?.split(",", 1)[0].trim() === "https";
+	const setUiSessionCookie = (req, res, value, maxAge = UI_SESSION_TTL_SECONDS) => {
+		res.setHeader(
+			"set-cookie",
+			`${UI_SESSION_COOKIE}=${value}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secureRequest(req) ? "; Secure" : ""}`,
+		);
+	};
 
 	const listing = () =>
 		[...runners.entries()].map(([id, r]) => ({ id, connectedAt: r.connectedAt, sessions: r.sessions.size }));
@@ -57,7 +109,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			return;
 		}
 		if (url.pathname === "/runners") {
-			if (!authorized(req)) {
+			if (!bearerAuthorized(req)) {
 				res.writeHead(401).end();
 				return;
 			}
@@ -65,8 +117,34 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			res.end(JSON.stringify(listing()));
 			return;
 		}
+		if (req.method === "POST" && url.pathname === "/api/session") {
+			let body = "";
+			let tooLarge = false;
+			req.setEncoding("utf8");
+			req.on("data", (chunk) => {
+				body += chunk;
+				if (body.length > 4096) tooLarge = true;
+			});
+			req.on("end", () => {
+				res.setHeader("cache-control", "no-store");
+				if (tooLarge) {
+					res.writeHead(413).end();
+					return;
+				}
+				const submittedToken = new URLSearchParams(body).get("token");
+				if (submittedToken === token) {
+					setUiSessionCookie(req, res, issueUiSession());
+					res.writeHead(303, { location: "/ui/" }).end();
+					return;
+				}
+				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
+				res.writeHead(303, { location: "/ui/?auth=failed" }).end();
+			});
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/api/state") {
-			if (!authorized(req)) {
+			if (!uiAuthorized(req)) {
+				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
 				res.writeHead(401).end();
 				return;
 			}
@@ -94,7 +172,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			return;
 		}
 		wss.handleUpgrade(req, socket, head, (ws) => {
-			if (!authorized(req)) {
+			if (!bearerAuthorized(req)) {
 				ws.close(4001, "bad token");
 				return;
 			}
