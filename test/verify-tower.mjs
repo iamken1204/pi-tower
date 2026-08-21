@@ -36,6 +36,18 @@ const runners = () =>
 	fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
 const apiState = () =>
 	fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json());
+const readSse = async (reader) => {
+	const decoder = new TextDecoder();
+	let event = "";
+	while (!event.includes("\n\n")) {
+		const { value, done } = await reader.read();
+		assert.equal(done, false);
+		event += decoder.decode(value, { stream: true });
+	}
+	const data = event.split("\n").find((line) => line.startsWith("data: "));
+	assert.ok(data);
+	return JSON.parse(data.slice(6));
+};
 
 // health
 assert.equal(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text()), "pi-tower");
@@ -45,11 +57,13 @@ console.log("ok health");
 assert.equal((await closed(attach("x", "s", "wrong"))).code, 4001);
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: "Bearer wrong" } })).status, 401);
 assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: "Bearer wrong" } })).status, 401);
+assert.equal((await fetch(`http://127.0.0.1:${port}/api/events`, { headers: { authorization: "Bearer wrong" } })).status, 401);
 console.log("ok auth 4001/401");
 
 // missing Authorization header also rejected
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners`)).status, 401);
 assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`)).status, 401);
+assert.equal((await fetch(`http://127.0.0.1:${port}/api/events`)).status, 401);
 console.log("ok missing auth header 401");
 
 const uiResponse = await fetch(`http://127.0.0.1:${port}/ui/`);
@@ -74,7 +88,11 @@ assert.match(setCookie, /^pi_tower_ui_session=[^;]+; Path=\/api; HttpOnly; SameS
 const sessionCookie = setCookie.split(";", 1)[0];
 assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: sessionCookie } })).status, 200);
 assert.equal((await fetch(`http://127.0.0.1:${port}/runners`, { headers: { cookie: sessionCookie } })).status, 401);
-console.log("ok UI session cookie authorizes only UI state");
+const eventResponse = await fetch(`http://127.0.0.1:${port}/api/events`, { headers: { cookie: sessionCookie } });
+assert.match(eventResponse.headers.get("content-type"), /^text\/event-stream/i);
+const eventReader = eventResponse.body.getReader();
+assert.deepEqual(await readSse(eventReader), { runners: [] });
+console.log("ok UI session cookie authorizes state and SSE");
 
 const tamperedCookie = `${sessionCookie.slice(0, -1)}${sessionCookie.endsWith("x") ? "y" : "x"}`;
 const tamperedResponse = await fetch(`http://127.0.0.1:${port}/api/state`, { headers: { cookie: tamperedCookie } });
@@ -95,6 +113,9 @@ console.log("ok failed UI login redirects and clears prior session");
 
 // unknown runner names online ids
 const fake1 = await connectFakeRunner(port, TOKEN, "r1");
+assert.deepEqual((await readSse(eventReader)).runners.map(({ id }) => id), ["r1"]);
+await eventReader.cancel();
+console.log("ok SSE pushes runner state changes");
 const ev404 = await closed(attach("nope"));
 assert.equal(ev404.code, 4004);
 assert.match(ev404.reason, /r1/);

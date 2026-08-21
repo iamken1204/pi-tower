@@ -101,6 +101,11 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			],
 		})),
 	});
+	const uiStreams = new Set();
+	const broadcastSnapshot = () => {
+		const event = `data: ${JSON.stringify(snapshot())}\n\n`;
+		for (const res of uiStreams) res.write(event);
+	};
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
@@ -153,6 +158,22 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			res.end(JSON.stringify(snapshot()));
 			return;
 		}
+		if (req.method === "GET" && url.pathname === "/api/events") {
+			if (!uiAuthorized(req)) {
+				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
+				res.writeHead(401).end();
+				return;
+			}
+			res.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache, no-transform",
+				connection: "keep-alive",
+			});
+			uiStreams.add(res);
+			res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+			req.on("close", () => uiStreams.delete(res));
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/ui/") {
 			res.setHeader("content-type", "text/html; charset=utf-8");
 			res.end(UI_HTML);
@@ -182,8 +203,8 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		});
 	});
 
-	// Proxies (Cloudflare's edge among them) drop idle WebSockets; a peer that misses
-	// two pings is gone, so terminate it to trigger the normal close-path cleanup.
+	// Proxies (Cloudflare's edge among them) drop idle connections; a WebSocket peer that misses
+	// two pings is gone, while SSE comments keep browser streams open.
 	const heartbeat = setInterval(() => {
 		for (const ws of wss.clients) {
 			if (ws.isAlive === false) {
@@ -193,6 +214,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			ws.isAlive = false;
 			ws.ping();
 		}
+		for (const res of uiStreams) res.write(": heartbeat\n\n");
 	}, 30000);
 	server.on("close", () => clearInterval(heartbeat));
 
@@ -202,6 +224,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		pending.delete(key);
 		clearTimeout(p.timer);
 		p.client.close(code, reason);
+		broadcastSnapshot();
 	}
 
 	function handleControl(ws, params) {
@@ -218,6 +241,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		};
 		if (prev) prev.ws.terminate(); // new control wins; session pipes survive
 		runners.set(id, runner);
+		broadcastSnapshot();
 		ws.on("close", () => {
 			if (runners.get(id)?.ws !== ws) return; // replaced
 			runners.delete(id);
@@ -228,6 +252,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			for (const key of [...pending.keys()]) {
 				if (key.startsWith(`${id}/`)) failPending(key, 4007, "runner failed to open session");
 			}
+			broadcastSnapshot();
 		});
 	}
 
@@ -250,6 +275,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			clearTimeout(p.timer);
 			for (const frame of p.queue) ws.send(frame);
 		}
+		broadcastSnapshot();
 		ws.on("message", (data) => {
 			if (runner.sessions.get(name)?.ws !== ws) return; // replaced
 			session.client?.send(data.toString());
@@ -259,6 +285,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			if (s?.ws !== ws) return; // replaced
 			s.client?.close(4006, "session disconnected");
 			runners.get(id).sessions.delete(name);
+			broadcastSnapshot();
 		});
 	}
 
@@ -293,6 +320,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 				timer: setTimeout(() => failPending(key, 4007, "runner failed to open session"), openTimeoutMs),
 			});
 		}
+		broadcastSnapshot();
 		ws.on("message", (data) => {
 			const p = pending.get(key);
 			if (p?.client === ws) {
@@ -307,10 +335,14 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			if (p?.client === ws) {
 				pending.delete(key);
 				clearTimeout(p.timer);
+				broadcastSnapshot();
 				return;
 			}
 			const s = runners.get(id)?.sessions.get(name);
-			if (s?.client === ws) s.client = null; // pipe stays idle, session context preserved for reattach
+			if (s?.client === ws) {
+				s.client = null; // pipe stays idle, session context preserved for reattach
+				broadcastSnapshot();
+			}
 		});
 	}
 

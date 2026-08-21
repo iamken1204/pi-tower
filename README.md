@@ -112,7 +112,7 @@ Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --
 
 Session pipes are pure relays: each WebSocket text frame is one pi RPC JSONL record (see pi's `docs/rpc.md`), untouched in both directions. The runner's control channel carries only `{"type":"open","session":"<name>"}` frames from the tower; the runner answers by dialing a session pipe.
 
-The public UI shell and health response expose no runner state. CLI requests and every WebSocket upgrade authenticate with an `Authorization: Bearer <token>` header. The UI exchanges the token for an HMAC-signed, HTTP-only cookie scoped to `/api`; `/api/state` accepts either form of authentication. The tower pings every connection every 30s and terminates peers that miss two pings.
+The public UI shell and health response expose no runner state. CLI requests and every WebSocket upgrade authenticate with an `Authorization: Bearer <token>` header. The UI exchanges the token for an HMAC-signed, HTTP-only cookie scoped to `/api`; `/api/state` and `/api/events` accept either form of authentication. The tower sends a heartbeat every 30s and terminates WebSocket peers that miss two pings.
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -120,6 +120,7 @@ The public UI shell and health response expose no runner state. CLI requests and
 | `GET /ui/` | public HTML state viewer shell |
 | `POST /api/session` | validate a UI token, set the signed session cookie, and redirect |
 | `GET /api/state` | protected JSON runner and session state |
+| `GET /api/events` | protected SSE stream of runner and session state |
 | `GET /runners` | JSON `[{id, connectedAt, sessions}]` |
 | `WS /runner?id=<id>` | runner control channel; same id reconnect replaces the socket, live sessions survive |
 | `WS /runner-session?id=<id>&session=<name>` | runner-dialed data pipe, one per session |

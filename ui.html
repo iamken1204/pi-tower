@@ -995,6 +995,7 @@
 		};
 		const authFailed = new URLSearchParams(location.search).get("auth") === "failed";
 		let timer;
+		let stream;
 		let pollId = 0;
 		let latestData = { runners: [] };
 		let selectedRunnerId = null;
@@ -1445,7 +1446,10 @@
 			);
 		}
 
-		async function poll(id) {
+		async function connect(id) {
+			clearTimeout(timer);
+			stream?.close();
+			stream = null;
 			try {
 				const response = await fetch("/api/state", { cache: "no-store", credentials: "same-origin" });
 				if (id !== pollId) return;
@@ -1459,7 +1463,7 @@
 					if (authFailed) setStatus("That token was not accepted. Check it and try again.", "error");
 					else if (sessionExpired) setStatus("Your session expired. Enter the tower token to reconnect.", "error");
 					else setStatus("Enter the tower token to load network state.");
-					pollingNote.textContent = "Automatic refresh is off";
+					pollingNote.textContent = "Live updates are off";
 					resultsNote.textContent = "Connect to view available runners.";
 					renderEmpty(
 						authFailed ? "Access denied" : "Authentication required",
@@ -1479,19 +1483,40 @@
 				filterInput.disabled = false;
 				refreshButton.disabled = false;
 				render(data);
-				pollingNote.textContent = `Updated ${new Date().toLocaleTimeString()} · every 2 seconds`;
+				pollingNote.textContent = `Updated ${new Date().toLocaleTimeString()} · connecting live updates`;
 				if (!wasAuthenticated) authDetails.open = false;
+
+				const events = new EventSource("/api/events");
+				stream = events;
+				events.onopen = () => {
+					if (id !== pollId || stream !== events) return;
+					setConnection("connected");
+					pollingNote.textContent = "Live updates connected";
+				};
+				events.onmessage = (event) => {
+					if (id !== pollId || stream !== events) return;
+					setConnection("connected");
+					render(JSON.parse(event.data));
+					pollingNote.textContent = `Updated ${new Date().toLocaleTimeString()} · live`;
+				};
+				events.onerror = () => {
+					if (id !== pollId || stream !== events) return;
+					setConnection("degraded");
+					setStatus("Live updates disconnected. Retrying automatically…", "error");
+					pollingNote.textContent = "Reconnecting live updates";
+				};
 			} catch (error) {
 				if (id !== pollId) return;
 				setConnection("degraded");
 				setStatus(error instanceof Error ? error.message : "Unable to read network state.", "error");
 				pollingNote.textContent = "Retrying automatically";
+				timer = setTimeout(() => connect(id), 2000);
 			}
-			timer = setTimeout(() => poll(id), 2000);
 		}
 
 		form.addEventListener("submit", () => {
 			clearTimeout(timer);
+			stream?.close();
 			++pollId;
 			setConnection("connecting");
 			setStatus("Checking the token and loading network state…");
@@ -1512,11 +1537,10 @@
 
 		refreshButton.addEventListener("click", () => {
 			if (document.body.dataset.authenticated !== "true") return;
-			clearTimeout(timer);
 			const id = ++pollId;
 			setStatus("Refreshing network state…");
 			pollingNote.textContent = "Refreshing now";
-			poll(id);
+			connect(id);
 		});
 
 		const clock = document.querySelector("#clock");
@@ -1531,7 +1555,7 @@
 		setConnection("connecting");
 		setStatus(authFailed ? "Confirming sign-in failure…" : "Restoring your session…");
 		pollingNote.textContent = "Connecting";
-		poll(++pollId);
+		connect(++pollId);
 	</script>
 </body>
 </html>
