@@ -3,91 +3,889 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>pi-tower state</title>
+	<meta name="color-scheme" content="light">
+	<meta name="theme-color" content="#e8e7df">
+	<title>Pi Tower — Network State</title>
 	<style>
-		:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-		body { max-width: 70rem; margin: auto; padding: 1.5rem; line-height: 1.5; }
-		h1 { margin-bottom: .5rem; }
-		form { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin: 1.5rem 0; }
-		label { display: grid; gap: .3rem; flex: 1 1 16rem; }
-		input, button { font: inherit; padding: .6rem .75rem; border: 1px solid #888; border-radius: .35rem; }
-		button { cursor: pointer; }
-		:focus-visible { outline: 3px solid #2684ff; outline-offset: 2px; }
-		#status { min-height: 1.5rem; }
-		.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); gap: 1rem; }
-		article { border: 1px solid #8888; border-radius: .5rem; padding: 1rem; }
-		article h2 { margin: 0; overflow-wrap: anywhere; }
-		.meta { color: #777; font-size: .9rem; }
-		ul { list-style: none; padding: 0; margin-bottom: 0; }
-		li { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-top: 1px solid #8884; }
-		.badge { border-radius: 1rem; padding: .1rem .55rem; font-size: .85rem; background: #7773; }
-		.badge.attached { background: #16803a33; }
-		.badge.opening { background: #b7791f33; }
+		:root {
+			--paper: #e8e7df;
+			--ink: #11120f;
+			--muted: #61625b;
+			--line: #11120f;
+			--signal: #d83b00;
+			--yellow: #f5d90a;
+			--blue: #2165f5;
+			--cyan: #42c7d9;
+			--green: #147a3d;
+			--unit: clamp(.75rem, 1.1vw, 1rem);
+			font-family: "SFMono-Regular", "Roboto Mono", "Liberation Mono", Menlo, Consolas, monospace;
+			font-synthesis: none;
+		}
+
+		* { box-sizing: border-box; }
+
+		html { background: var(--ink); }
+
+		body {
+			margin: 0;
+			min-width: 20rem;
+			min-height: 100vh;
+			background: var(--paper);
+			color: var(--ink);
+			font-size: 13px;
+			line-height: 1.25;
+			-webkit-font-smoothing: antialiased;
+		}
+
+		button, input { font: inherit; }
+		button { color: inherit; }
+
+		::selection {
+			background: var(--blue);
+			color: #fff;
+		}
+
+		:focus-visible {
+			outline: 3px solid var(--blue);
+			outline-offset: -3px;
+		}
+
+		.shell {
+			width: min(100%, 120rem);
+			min-height: 100vh;
+			margin: 0 auto;
+			border-inline: 1px solid var(--line);
+		}
+
+		.masthead {
+			display: grid;
+			grid-template-columns: minmax(17rem, 1fr) auto;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.brand {
+			display: flex;
+			min-width: 0;
+			align-items: stretch;
+		}
+
+		.colorbar {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			width: 5.5rem;
+			min-height: 5.5rem;
+			flex: 0 0 auto;
+			border-right: 1px solid var(--line);
+		}
+
+		.colorbar span:nth-child(1) { background: var(--signal); }
+		.colorbar span:nth-child(2) { background: var(--yellow); }
+		.colorbar span:nth-child(3) { background: var(--blue); }
+		.colorbar span:nth-child(4) { background: var(--cyan); }
+
+		.wordmark {
+			display: flex;
+			min-width: 0;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: .7rem .8rem .65rem;
+		}
+
+		.wordmark strong {
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(1.85rem, 3.1vw, 3.4rem);
+			font-weight: 900;
+			font-stretch: condensed;
+			letter-spacing: -.035em;
+			line-height: .82;
+			text-transform: uppercase;
+			white-space: nowrap;
+		}
+
+		.eyebrow {
+			color: var(--muted);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		.mast-meta {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(8.5rem, auto));
+		}
+
+		.meta-cell {
+			display: flex;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: .7rem .8rem;
+			border-left: 1px solid var(--line);
+		}
+
+		.meta-cell time,
+		.meta-cell strong {
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: .02em;
+		}
+
+		.utility-bar {
+			display: grid;
+			grid-template-columns: 7rem 1fr auto;
+			min-height: 2.15rem;
+			align-items: stretch;
+			border-bottom: 1px solid var(--line);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		.utility-bar > * {
+			display: flex;
+			align-items: center;
+			padding: .5rem .65rem;
+		}
+
+		.section-code {
+			justify-content: space-between;
+			background: var(--ink);
+			color: var(--paper);
+		}
+
+		.utility-copy { border-right: 1px solid var(--line); }
+
+		.system-health { gap: .5rem; }
+
+		.system-health::before {
+			width: .55rem;
+			height: .55rem;
+			background: var(--signal);
+			content: "";
+		}
+
+		body[data-authenticated="true"] .system-health::before {
+			background: var(--green);
+			animation: pulse 2s steps(1) infinite;
+		}
+
+		.intro {
+			display: grid;
+			grid-template-columns: minmax(0, 1.55fr) minmax(19rem, .7fr);
+			border-bottom: 1px solid var(--line);
+		}
+
+		.title-block {
+			display: flex;
+			min-height: 17rem;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: calc(var(--unit) * 1.2);
+			border-right: 1px solid var(--line);
+		}
+
+		h1 {
+			max-width: 10ch;
+			margin: 0;
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(4rem, 8.4vw, 9rem);
+			font-weight: 900;
+			font-stretch: condensed;
+			letter-spacing: -.045em;
+			line-height: .78;
+			text-transform: uppercase;
+		}
+
+		h1 span { color: var(--signal); }
+
+		.intro-copy {
+			display: grid;
+			grid-template-columns: 5rem minmax(0, 38rem);
+			gap: 1rem;
+			align-items: end;
+		}
+
+		.intro-copy p { margin: 0; }
+
+		.auth-panel {
+			display: flex;
+			min-height: 17rem;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: calc(var(--unit) * 1.2);
+			background:
+				linear-gradient(135deg, transparent 0 49.6%, var(--line) 49.8% 50.2%, transparent 50.4%) 0 0 / 12px 12px;
+		}
+
+		.auth-panel form {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			margin-top: 3rem;
+			background: var(--paper);
+			border: 1px solid var(--line);
+		}
+
+		.field { min-width: 0; }
+
+		.field label {
+			display: block;
+			padding: .55rem .65rem 0;
+			font-size: 9px;
+			font-weight: 700;
+			letter-spacing: .09em;
+			text-transform: uppercase;
+		}
+
+		input {
+			display: block;
+			width: 100%;
+			min-width: 0;
+			padding: .42rem .65rem .7rem;
+			background: transparent;
+			border: 0;
+			border-radius: 0;
+			color: var(--ink);
+			font-size: 15px;
+			font-weight: 700;
+		}
+
+		input::placeholder { color: var(--muted); }
+
+		button {
+			min-width: 7rem;
+			padding: .75rem 1rem;
+			background: var(--ink);
+			border: 0;
+			border-left: 1px solid var(--line);
+			border-radius: 0;
+			color: var(--paper);
+			font-size: 11px;
+			font-weight: 800;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+			cursor: pointer;
+		}
+
+		button:hover { background: var(--blue); }
+		button:active { background: var(--signal); }
+
+		.auth-note {
+			margin: 1rem 0 0;
+			padding: .6rem .65rem;
+			background: var(--paper);
+			border: 1px solid var(--line);
+			font-size: 10px;
+		}
+
+		.status-strip {
+			display: grid;
+			grid-template-columns: 7rem minmax(0, 1fr) auto;
+			min-height: 3rem;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.status-strip > * {
+			display: flex;
+			align-items: center;
+			margin: 0;
+			padding: .65rem;
+		}
+
+		.status-label {
+			justify-content: space-between;
+			background: var(--yellow);
+			border-right: 1px solid var(--line);
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		#status { font-weight: 700; }
+		#status[data-kind="error"] { background: var(--signal); color: #fff; }
+		#status[data-kind="success"] { background: #c8dfca; }
+
+		.polling-note {
+			border-left: 1px solid var(--line);
+			color: var(--muted);
+			font-size: 9px;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+		}
+
+		.metrics {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			border-bottom: 1px solid var(--line);
+		}
+
+		.metric {
+			display: flex;
+			min-height: 7.5rem;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: .7rem;
+			border-right: 1px solid var(--line);
+		}
+
+		.metric:last-child { border-right: 0; }
+
+		.metric dt {
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 700;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		.metric dd {
+			margin: 0;
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(2.5rem, 5vw, 5rem);
+			font-weight: 900;
+			letter-spacing: -.035em;
+			line-height: .75;
+		}
+
+		.directory-head {
+			display: grid;
+			grid-template-columns: 7rem 1fr auto;
+			min-height: 4rem;
+			align-items: stretch;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.directory-head > * {
+			display: flex;
+			align-items: center;
+			margin: 0;
+			padding: .75rem;
+		}
+
+		.directory-head .section-code { font-size: 10px; }
+
+		.directory-head h2 {
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(1.8rem, 3vw, 3rem);
+			font-weight: 900;
+			letter-spacing: -.02em;
+			line-height: 1;
+			text-transform: uppercase;
+		}
+
+		.directory-key {
+			border-left: 1px solid var(--line);
+			font-size: 9px;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+		}
+
+		#runners { min-height: 16rem; }
+
+		.empty-state {
+			display: grid;
+			grid-template-columns: 7rem 1fr;
+			min-height: 16rem;
+			background:
+				repeating-linear-gradient(135deg, transparent 0 7px, #11120f10 7px 8px);
+		}
+
+		.empty-code {
+			display: flex;
+			align-items: flex-end;
+			padding: .7rem;
+			border-right: 1px solid var(--line);
+			color: var(--muted);
+			font-size: 10px;
+		}
+
+		.empty-copy {
+			display: flex;
+			max-width: 50rem;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: 1.2rem;
+		}
+
+		.empty-copy strong {
+			max-width: 13ch;
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(2.4rem, 6vw, 6rem);
+			font-weight: 900;
+			letter-spacing: -.035em;
+			line-height: .86;
+			text-transform: uppercase;
+		}
+
+		.empty-copy p {
+			max-width: 46ch;
+			margin: 2rem 0 0;
+		}
+
+		.runner { border-bottom: 1px solid var(--line); }
+
+		.runner-heading {
+			display: grid;
+			grid-template-columns: 7rem minmax(13rem, 1.4fr) repeat(3, minmax(10rem, .6fr));
+			min-height: 6.5rem;
+		}
+
+		.runner-heading > * {
+			display: flex;
+			min-width: 0;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: .7rem;
+			border-right: 1px solid var(--line);
+		}
+
+		.runner-heading > *:last-child { border-right: 0; }
+
+		.runner-index {
+			background: var(--blue);
+			color: #fff;
+		}
+
+		.runner-index strong {
+			font-size: 2rem;
+			line-height: 1;
+		}
+
+		.runner-id h3 {
+			margin: 0;
+			overflow-wrap: anywhere;
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: clamp(2rem, 4vw, 4rem);
+			font-weight: 900;
+			letter-spacing: -.03em;
+			line-height: .8;
+			text-transform: uppercase;
+		}
+
+		.data-label {
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 700;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		.data-value {
+			font-size: 12px;
+			font-weight: 700;
+		}
+
+		.session-table { width: 100%; }
+
+		.session-row {
+			display: grid;
+			grid-template-columns: 7rem minmax(12rem, 1.4fr) minmax(8rem, .6fr) minmax(10rem, .6fr);
+			border-top: 1px solid var(--line);
+		}
+
+		.session-row > * {
+			min-width: 0;
+			padding: .65rem .7rem;
+			border-right: 1px solid var(--line);
+		}
+
+		.session-row > *:last-child { border-right: 0; }
+
+		.session-row--head {
+			background: var(--ink);
+			color: var(--paper);
+			font-size: 9px;
+			font-weight: 700;
+			letter-spacing: .08em;
+			text-transform: uppercase;
+		}
+
+		.session-name {
+			overflow-wrap: anywhere;
+		font-weight: 800;
+		}
+
+		.state {
+			display: inline-flex;
+			align-items: center;
+			gap: .5rem;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+		}
+
+		.state::before {
+			width: .58rem;
+			height: .58rem;
+			background: var(--muted);
+			border: 1px solid currentColor;
+			content: "";
+		}
+
+		.state[data-state="attached"]::before { background: var(--green); }
+		.state[data-state="opening"]::before { background: var(--yellow); }
+
+		.runner-empty {
+			padding: 1rem .7rem 1rem 7.7rem;
+			border-top: 1px solid var(--line);
+			background: repeating-linear-gradient(135deg, transparent 0 7px, #11120f0c 7px 8px);
+			color: var(--muted);
+			font-size: 10px;
+			text-transform: uppercase;
+		}
+
+		footer {
+			display: grid;
+			grid-template-columns: 7rem minmax(0, 1fr) auto;
+			min-height: 5rem;
+			background: var(--ink);
+			color: var(--paper);
+		}
+
+		footer > * {
+			display: flex;
+			align-items: flex-end;
+			margin: 0;
+			padding: .7rem;
+			border-right: 1px solid #e8e7df66;
+		}
+
+		footer > *:last-child { border-right: 0; }
+		footer p { max-width: 58ch; }
+
+		.footer-build {
+			color: var(--yellow);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+		}
+
+		@keyframes pulse {
+			50% { opacity: .35; }
+		}
+
+		@media (max-width: 860px) {
+			.masthead { grid-template-columns: 1fr; }
+			.mast-meta { border-top: 1px solid var(--line); }
+			.meta-cell:first-child { border-left: 0; }
+			.intro { grid-template-columns: 1fr; }
+			.title-block { border-right: 0; border-bottom: 1px solid var(--line); }
+			.metrics { grid-template-columns: repeat(2, 1fr); }
+			.metric:nth-child(2) { border-right: 0; }
+			.metric:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
+			.runner { overflow-x: auto; }
+			.runner-heading { min-width: 50rem; }
+			.session-table { min-width: 42rem; }
+		}
+
+		@media (max-width: 560px) {
+			.colorbar { width: 4rem; min-height: 4.75rem; }
+			.wordmark strong { font-size: 1.65rem; }
+			.mast-meta { grid-template-columns: 1fr 1fr; }
+			.meta-cell { min-height: 4rem; }
+			.utility-bar { grid-template-columns: 4rem 1fr; }
+			.utility-copy { border-right: 0; }
+			.system-health { display: none; }
+			.title-block { min-height: 15rem; }
+			h1 { font-size: clamp(3.5rem, 20vw, 6rem); }
+			.intro-copy { grid-template-columns: 4rem 1fr; }
+			.auth-panel { min-height: 14rem; }
+			.auth-panel form { grid-template-columns: 1fr; }
+			button { min-height: 3.2rem; border-top: 1px solid var(--line); border-left: 0; }
+			.status-strip { grid-template-columns: 4rem 1fr; }
+			.polling-note { display: none; }
+			.metrics { grid-template-columns: 1fr 1fr; }
+			.metric { min-height: 6rem; }
+			.directory-head { grid-template-columns: 4rem 1fr; }
+			.directory-key { display: none; }
+			.empty-state { grid-template-columns: 4rem 1fr; }
+			footer { grid-template-columns: 4rem 1fr; }
+			.footer-build { grid-column: 1 / -1; border-top: 1px solid #e8e7df66; }
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			*, *::before, *::after { animation: none !important; }
+		}
 	</style>
 </head>
-<body>
-	<main>
-		<h1>pi-tower state</h1>
-		<p>View connected runners and their sessions.</p>
-		<form id="auth-form">
-			<label for="token">Password token<input id="token" name="token" type="password" required autocomplete="off"></label>
-			<button type="submit">Connect</button>
-		</form>
-		<p id="status" role="status" aria-live="polite">Enter the tower token to load state.</p>
-		<section id="runners" class="grid" aria-label="Runners"></section>
-	</main>
+<body data-authenticated="false">
+	<div class="shell">
+		<header class="masthead">
+			<div class="brand">
+				<div class="colorbar" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+				<div class="wordmark">
+					<strong>Pi Tower</strong>
+					<span class="eyebrow">Remote execution relay / network control</span>
+				</div>
+			</div>
+			<div class="mast-meta">
+				<div class="meta-cell">
+					<span class="eyebrow">Interface</span>
+					<strong>WEB–01 / STATE</strong>
+				</div>
+				<div class="meta-cell">
+					<span class="eyebrow">Tower time / local</span>
+					<time id="clock" datetime="">00:00:00</time>
+				</div>
+			</div>
+		</header>
+
+		<div class="utility-bar">
+			<span class="section-code">00 <span>→</span></span>
+			<span class="utility-copy">Operational telemetry / Authorized access only</span>
+			<span class="system-health">Relay interface ready</span>
+		</div>
+
+		<main>
+			<section class="intro" aria-labelledby="page-title">
+				<div class="title-block">
+					<h1 id="page-title">Network<br><span>State</span></h1>
+					<div class="intro-copy">
+						<span class="eyebrow">Purpose</span>
+						<p>Observe every connected runner, exposed session, and attachment state through one direct control surface.</p>
+					</div>
+				</div>
+				<div class="auth-panel">
+					<div>
+						<span class="eyebrow">Authentication / Bearer</span>
+						<form id="auth-form">
+							<div class="field">
+								<label for="token">Tower access token</label>
+								<input id="token" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="••••••••••••">
+							</div>
+							<button type="submit">Connect →</button>
+						</form>
+					</div>
+					<p class="auth-note">Credential remains in volatile page memory. State refreshes every 2,000 ms after authorization.</p>
+				</div>
+			</section>
+
+			<section class="status-strip" aria-label="Connection status">
+				<span class="status-label">STAT <span>→</span></span>
+				<p id="status" role="status" aria-live="polite" data-kind="idle">Awaiting access token. Network data is sealed.</p>
+				<span class="polling-note" id="polling-note">Polling inactive</span>
+			</section>
+
+			<dl class="metrics" aria-label="Network totals">
+				<div class="metric">
+					<dt>Connected runners / R</dt>
+					<dd id="runner-count">00</dd>
+				</div>
+				<div class="metric">
+					<dt>Known sessions / S</dt>
+					<dd id="session-count">00</dd>
+				</div>
+				<div class="metric">
+					<dt>Attached / A</dt>
+					<dd id="attached-count">00</dd>
+				</div>
+				<div class="metric">
+					<dt>Opening / O</dt>
+					<dd id="opening-count">00</dd>
+				</div>
+			</dl>
+
+			<section aria-labelledby="directory-title">
+				<header class="directory-head">
+					<span class="section-code">01 <span>→</span></span>
+					<h2 id="directory-title">Runner Directory</h2>
+					<span class="directory-key">ID / connection / uptime / sessions / state</span>
+				</header>
+				<div id="runners">
+					<div class="empty-state">
+						<span class="empty-code">R–000</span>
+						<div class="empty-copy">
+							<strong>State unavailable</strong>
+							<p>Submit the tower token to establish a read channel and enumerate online runners.</p>
+						</div>
+					</div>
+				</div>
+			</section>
+		</main>
+
+		<footer>
+			<span>π/T</span>
+			<p>Pi Tower relays RPC frames between clients and isolated runner sessions. This interface presents live operational state only.</p>
+			<span class="footer-build">PI-TOWER STATE / UI REV. 02</span>
+		</footer>
+	</div>
+
 	<script>
 		const form = document.querySelector("#auth-form");
 		const input = document.querySelector("#token");
 		const status = document.querySelector("#status");
+		const pollingNote = document.querySelector("#polling-note");
 		const container = document.querySelector("#runners");
+		const counts = {
+			runners: document.querySelector("#runner-count"),
+			sessions: document.querySelector("#session-count"),
+			attached: document.querySelector("#attached-count"),
+			opening: document.querySelector("#opening-count"),
+		};
 		let token = "";
 		let timer;
 		let pollId = 0;
 
-		function showStatus(message) {
+		const padCount = (value) => String(value).padStart(2, "0");
+		const dateTime = (value) => new Intl.DateTimeFormat(undefined, {
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit",
+			second: "2-digit",
+		}).format(new Date(value));
+		const elapsed = (value) => {
+			const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+			const days = Math.floor(seconds / 86400);
+			const hours = Math.floor((seconds % 86400) / 3600);
+			const minutes = Math.floor((seconds % 3600) / 60);
+			return `${days ? `${days}D ` : ""}${String(hours).padStart(2, "0")}H ${String(minutes).padStart(2, "0")}M`;
+		};
+
+		function setStatus(message, kind = "idle") {
 			status.textContent = message;
+			status.dataset.kind = kind;
+		}
+
+		function setCounts(runners = []) {
+			const sessions = runners.flatMap((runner) => runner.sessions);
+			counts.runners.textContent = padCount(runners.length);
+			counts.sessions.textContent = padCount(sessions.length);
+			counts.attached.textContent = padCount(sessions.filter((session) => session.state === "attached").length);
+			counts.opening.textContent = padCount(sessions.filter((session) => session.state === "opening").length);
+		}
+
+		function createCell(label, value) {
+			const cell = document.createElement("div");
+			const key = document.createElement("span");
+			const data = document.createElement("span");
+			key.className = "data-label";
+			data.className = "data-value";
+			key.textContent = label;
+			data.textContent = value;
+			cell.append(key, data);
+			return cell;
+		}
+
+		function createState(state) {
+			const badge = document.createElement("span");
+			badge.className = "state";
+			badge.dataset.state = state;
+			badge.textContent = state;
+			return badge;
+		}
+
+		function renderEmpty(title, message, code = "R–000") {
+			const empty = document.createElement("div");
+			empty.className = "empty-state";
+			const marker = document.createElement("span");
+			marker.className = "empty-code";
+			marker.textContent = code;
+			const copy = document.createElement("div");
+			copy.className = "empty-copy";
+			const heading = document.createElement("strong");
+			heading.textContent = title;
+			const detail = document.createElement("p");
+			detail.textContent = message;
+			copy.append(heading, detail);
+			empty.append(marker, copy);
+			container.replaceChildren(empty);
 		}
 
 		function render(data) {
 			container.replaceChildren();
+			setCounts(data.runners);
 			if (!data.runners.length) {
-				showStatus("No runners are connected.");
+				setStatus("Authorized. No runners are connected to the relay.", "success");
+				renderEmpty("No signal received", "The state channel is open, but no remote runners are currently registered.", "R–Ø");
 				return;
 			}
-			showStatus(`${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} connected.`);
-			for (const runner of data.runners) {
+
+			const sessionTotal = data.runners.reduce((total, runner) => total + runner.sessions.length, 0);
+			setStatus(`Authorized. ${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} and ${sessionTotal} session${sessionTotal === 1 ? "" : "s"} indexed.`, "success");
+
+			data.runners.forEach((runner, runnerIndex) => {
 				const card = document.createElement("article");
-				const heading = document.createElement("h2");
-				heading.textContent = runner.id;
-				const connected = document.createElement("p");
-				connected.className = "meta";
-				connected.append("Connected ");
-				const time = document.createElement("time");
-				time.dateTime = runner.connectedAt;
-				time.textContent = new Date(runner.connectedAt).toLocaleString();
-				connected.append(time);
-				card.append(heading, connected);
+				card.className = "runner";
+
+				const heading = document.createElement("header");
+				heading.className = "runner-heading";
+				const index = document.createElement("div");
+				index.className = "runner-index";
+				const indexLabel = document.createElement("span");
+				indexLabel.className = "data-label";
+				indexLabel.textContent = "Runner";
+				const indexValue = document.createElement("strong");
+				indexValue.textContent = `R${padCount(runnerIndex + 1)}`;
+				index.append(indexLabel, indexValue);
+
+				const identity = document.createElement("div");
+				identity.className = "runner-id";
+				const identityLabel = document.createElement("span");
+				identityLabel.className = "data-label";
+				identityLabel.textContent = "Node identifier";
+				const title = document.createElement("h3");
+				title.textContent = runner.id;
+				identity.append(identityLabel, title);
+
+				heading.append(
+					index,
+					identity,
+					createCell("Connection state", "ONLINE / READY"),
+					createCell("Connected at", dateTime(runner.connectedAt)),
+					createCell("Elapsed uptime", elapsed(runner.connectedAt)),
+				);
+				card.append(heading);
+
 				if (!runner.sessions.length) {
-					const empty = document.createElement("p");
-					empty.textContent = "No sessions.";
+					const empty = document.createElement("div");
+					empty.className = "runner-empty";
+					empty.textContent = "Session inventory empty / runner control channel only";
 					card.append(empty);
 				} else {
-					const list = document.createElement("ul");
-					for (const session of runner.sessions) {
-						const item = document.createElement("li");
-						const name = document.createElement("span");
-						name.textContent = session.name;
-						const badge = document.createElement("span");
-						badge.className = `badge ${session.state}`;
-						badge.textContent = session.state;
-						item.append(name, badge);
-						list.append(item);
+					const table = document.createElement("div");
+					table.className = "session-table";
+					table.setAttribute("role", "table");
+					table.setAttribute("aria-label", `Sessions on ${runner.id}`);
+
+					const tableHead = document.createElement("div");
+					tableHead.className = "session-row session-row--head";
+					tableHead.setAttribute("role", "row");
+					for (const label of ["Index", "Session identifier", "Pipe state", "Client condition"]) {
+						const cell = document.createElement("span");
+						cell.setAttribute("role", "columnheader");
+						cell.textContent = label;
+						tableHead.append(cell);
 					}
-					card.append(list);
+					table.append(tableHead);
+
+					runner.sessions.forEach((session, sessionIndex) => {
+						const row = document.createElement("div");
+						row.className = "session-row";
+						row.setAttribute("role", "row");
+						const sessionCode = document.createElement("span");
+						sessionCode.setAttribute("role", "cell");
+						sessionCode.textContent = `S${padCount(sessionIndex + 1)}`;
+						const sessionName = document.createElement("span");
+						sessionName.className = "session-name";
+						sessionName.setAttribute("role", "rowheader");
+						sessionName.textContent = session.name;
+						const state = createState(session.state);
+						state.setAttribute("role", "cell");
+						const condition = document.createElement("span");
+						condition.setAttribute("role", "cell");
+						condition.textContent = session.state === "attached" ? "CLIENT ATTACHED" : session.state === "opening" ? "PIPE NEGOTIATING" : "STANDING BY";
+						row.append(sessionCode, sessionName, state, condition);
+						table.append(row);
+					});
+					card.append(table);
 				}
 				container.append(card);
-			}
+			});
 		}
 
 		async function poll(id) {
@@ -99,18 +897,25 @@
 				if (id !== pollId) return;
 				if (response.status === 401) {
 					token = "";
-					container.replaceChildren();
-					showStatus("Unauthorized. Enter the correct token.");
+					document.body.dataset.authenticated = "false";
+					setCounts();
+					setStatus("Authorization rejected. Verify the tower access token.", "error");
+					pollingNote.textContent = "Polling halted / HTTP 401";
+					renderEmpty("Access denied", "The relay refused this credential. Enter the configured tower token and retry.", "E–401");
 					input.focus();
 					return;
 				}
-				if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+				if (!response.ok) throw new Error(`State request failed / HTTP ${response.status}`);
 				const data = await response.json();
 				if (id !== pollId) return;
+				document.body.dataset.authenticated = "true";
 				render(data);
+				pollingNote.textContent = `Last sample ${new Date().toLocaleTimeString()} / 2S cycle`;
 			} catch (error) {
 				if (id !== pollId) return;
-				showStatus(error instanceof Error ? error.message : "Unable to load state.");
+				document.body.dataset.authenticated = "false";
+				setStatus(error instanceof Error ? error.message : "Unable to read network state.", "error");
+				pollingNote.textContent = "Polling degraded / retry scheduled";
 			}
 			if (token) timer = setTimeout(() => poll(id), 2000);
 		}
@@ -121,10 +926,22 @@
 			const id = ++pollId;
 			token = input.value;
 			input.value = "";
-			container.replaceChildren();
-			showStatus("Loading state…");
+			document.body.dataset.authenticated = "false";
+			setCounts();
+			setStatus("Opening authenticated state channel…", "idle");
+			pollingNote.textContent = "Negotiating / request 001";
+			renderEmpty("Reading network", "Authorization is in progress. The runner directory will populate after the first state sample.", "TX–01");
 			poll(id);
 		});
+
+		const clock = document.querySelector("#clock");
+		const updateClock = () => {
+			const now = new Date();
+			clock.dateTime = now.toISOString();
+			clock.textContent = now.toLocaleTimeString(undefined, { hour12: false });
+		};
+		updateClock();
+		setInterval(updateClock, 1000);
 	</script>
 </body>
 </html>
