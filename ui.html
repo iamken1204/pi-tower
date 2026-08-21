@@ -9,22 +9,25 @@
 	<style>
 		:root {
 			--paper: #e8e7df;
+			--paper-raised: #f4f3eb;
 			--ink: #11120f;
-			--muted: #61625b;
+			--muted: #575850;
 			--line: #11120f;
 			--signal: #d83b00;
 			--yellow: #f5d90a;
-			--blue: #2165f5;
+			--blue: #1753d1;
 			--cyan: #42c7d9;
-			--green: #147a3d;
-			--unit: clamp(.75rem, 1.1vw, 1rem);
+			--green: #126b37;
 			font-family: "SFMono-Regular", "Roboto Mono", "Liberation Mono", Menlo, Consolas, monospace;
 			font-synthesis: none;
 		}
 
 		* { box-sizing: border-box; }
 
-		html { background: var(--ink); }
+		html {
+			background: var(--ink);
+			scroll-behavior: smooth;
+		}
 
 		body {
 			margin: 0;
@@ -32,13 +35,23 @@
 			min-height: 100vh;
 			background: var(--paper);
 			color: var(--ink);
-			font-size: 13px;
-			line-height: 1.25;
+			font-size: 14px;
+			line-height: 1.45;
 			-webkit-font-smoothing: antialiased;
 		}
 
 		button, input { font: inherit; }
-		button { color: inherit; }
+
+		button {
+			color: inherit;
+			cursor: pointer;
+		}
+
+		button:disabled,
+		input:disabled {
+			cursor: not-allowed;
+			opacity: .52;
+		}
 
 		::selection {
 			background: var(--blue);
@@ -47,33 +60,67 @@
 
 		:focus-visible {
 			outline: 3px solid var(--blue);
-			outline-offset: -3px;
+			outline-offset: 3px;
+		}
+
+		.skip-link {
+			position: fixed;
+			top: .5rem;
+			left: .5rem;
+			z-index: 20;
+			padding: .65rem .8rem;
+			transform: translateY(-150%);
+			background: var(--ink);
+			color: var(--paper);
+			font-weight: 800;
+		}
+
+		.skip-link:focus { transform: translateY(0); }
+
+		.visually-hidden {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
 		}
 
 		.shell {
-			width: min(100%, 120rem);
+			display: flex;
+			width: min(100%, 100rem);
 			min-height: 100vh;
 			margin: 0 auto;
+			flex-direction: column;
 			border-inline: 1px solid var(--line);
 		}
 
+		main { flex: 1 0 auto; }
+
 		.masthead {
+			position: sticky;
+			top: 0;
+			z-index: 10;
 			display: grid;
-			grid-template-columns: minmax(17rem, 1fr) auto;
+			grid-template-columns: minmax(0, 1fr) auto;
+			min-height: 3.5rem;
+			background: color-mix(in srgb, var(--paper) 96%, transparent);
 			border-bottom: 1px solid var(--line);
+			backdrop-filter: blur(12px);
 		}
 
 		.brand {
 			display: flex;
 			min-width: 0;
-			align-items: stretch;
 		}
 
 		.colorbar {
 			display: grid;
 			grid-template-columns: repeat(4, 1fr);
-			width: 5.5rem;
-			min-height: 5.5rem;
+			width: 3.5rem;
 			flex: 0 0 auto;
 			border-right: 1px solid var(--line);
 		}
@@ -87,142 +134,123 @@
 			display: flex;
 			min-width: 0;
 			flex-direction: column;
-			justify-content: space-between;
-			padding: .7rem .8rem .65rem;
+			justify-content: center;
+			padding: .4rem .7rem;
+		}
+
+		.wordmark strong,
+		h2,
+		.runner-name {
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-weight: 900;
+			font-stretch: condensed;
+			letter-spacing: -.025em;
+			text-transform: uppercase;
 		}
 
 		.wordmark strong {
-			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(1.85rem, 3.1vw, 3.4rem);
-			font-weight: 900;
-			font-stretch: condensed;
-			letter-spacing: -.035em;
-			line-height: .82;
-			text-transform: uppercase;
-			white-space: nowrap;
+			font-size: 1.55rem;
+			line-height: .9;
 		}
+
+		.wordmark strong span { color: var(--signal); }
 
 		.eyebrow {
 			color: var(--muted);
 			font-size: 10px;
-			font-weight: 700;
-			letter-spacing: .08em;
+			font-weight: 800;
+			letter-spacing: .07em;
 			text-transform: uppercase;
 		}
 
-		.mast-meta {
+		.header-state {
 			display: grid;
-			grid-template-columns: repeat(2, minmax(8.5rem, auto));
+			grid-template-columns: auto auto;
 		}
 
-		.meta-cell {
-			display: flex;
-			flex-direction: column;
-			justify-content: space-between;
-			padding: .7rem .8rem;
+		.header-state > * {
+			min-width: 8.5rem;
 			border-left: 1px solid var(--line);
 		}
 
-		.meta-cell time,
-		.meta-cell strong {
-			font-size: 12px;
-			font-weight: 700;
-			letter-spacing: .02em;
+		.connection-menu { position: relative; }
+
+		.connection-menu > summary,
+		.header-clock {
+			display: flex;
+			min-height: 100%;
+			flex-direction: column;
+			justify-content: center;
+			gap: .05rem;
+			padding: .4rem .65rem;
 		}
 
-		.utility-bar {
-			display: grid;
-			grid-template-columns: 7rem 1fr auto;
-			min-height: 2.15rem;
-			align-items: stretch;
-			border-bottom: 1px solid var(--line);
-			font-size: 10px;
-			font-weight: 700;
-			letter-spacing: .08em;
-			text-transform: uppercase;
+		.connection-menu > summary {
+			list-style: none;
+			cursor: pointer;
 		}
 
-		.utility-bar > * {
+		.connection-menu > summary::-webkit-details-marker { display: none; }
+		.connection-menu > summary:hover,
+		.connection-menu[open] > summary { background: var(--paper-raised); }
+		.connection-menu[open] > summary { box-shadow: inset 0 -3px 0 var(--ink); }
+
+		.connection-indicator {
 			display: flex;
 			align-items: center;
-			padding: .5rem .65rem;
+			gap: .45rem;
+			font-size: 11px;
+			font-weight: 800;
 		}
 
-		.section-code {
-			justify-content: space-between;
-			background: var(--ink);
-			color: var(--paper);
-		}
-
-		.utility-copy { border-right: 1px solid var(--line); }
-
-		.system-health { gap: .5rem; }
-
-		.system-health::before {
+		.connection-indicator::before {
 			width: .55rem;
 			height: .55rem;
+			flex: 0 0 auto;
 			background: var(--signal);
+			border: 1px solid var(--ink);
 			content: "";
 		}
 
-		body[data-authenticated="true"] .system-health::before {
-			background: var(--green);
-			animation: pulse 2s steps(1) infinite;
+		body[data-authenticated="true"] .connection-indicator::before { background: var(--green); }
+		body[data-connection="degraded"] .connection-indicator::before { background: var(--yellow); }
+
+		.connection-popover {
+			position: absolute;
+			top: calc(100% + 1px);
+			right: -1px;
+			z-index: 12;
+			width: min(32rem, calc(100vw - 1rem));
+			padding: .75rem;
+			background:
+				repeating-linear-gradient(135deg, var(--paper) 0 8px, #deddd5 8px 9px);
+			border: 1px solid var(--line);
+			box-shadow: 0 .6rem 0 #11120f24;
 		}
 
-		.intro {
-			display: grid;
-			grid-template-columns: minmax(0, 1.55fr) minmax(19rem, .7fr);
-			border-bottom: 1px solid var(--line);
-		}
+		.header-clock time { font-size: 11px; font-weight: 800; }
 
-		.title-block {
+		main:focus { outline: none; }
+
+		.section-code {
+			align-self: stretch;
 			display: flex;
-			min-height: 17rem;
-			flex-direction: column;
+			align-items: center;
 			justify-content: space-between;
-			padding: calc(var(--unit) * 1.2);
-			border-right: 1px solid var(--line);
-		}
-
-		h1 {
-			max-width: 10ch;
-			margin: 0;
-			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(4rem, 8.4vw, 9rem);
-			font-weight: 900;
-			font-stretch: condensed;
-			letter-spacing: -.045em;
-			line-height: .78;
+			padding: .7rem;
+			background: var(--ink);
+			color: var(--paper);
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .07em;
 			text-transform: uppercase;
 		}
 
-		h1 span { color: var(--signal); }
-
-		.intro-copy {
-			display: grid;
-			grid-template-columns: 5rem minmax(0, 38rem);
-			gap: 1rem;
-			align-items: end;
-		}
-
-		.intro-copy p { margin: 0; }
-
-		.auth-panel {
-			display: flex;
-			min-height: 17rem;
-			flex-direction: column;
-			justify-content: space-between;
-			padding: calc(var(--unit) * 1.2);
-			background:
-				linear-gradient(135deg, transparent 0 49.6%, var(--line) 49.8% 50.2%, transparent 50.4%) 0 0 / 12px 12px;
-		}
-
-		.auth-panel form {
+		.auth-form {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
-			margin-top: 3rem;
-			background: var(--paper);
+			align-self: start;
+			background: var(--paper-raised);
 			border: 1px solid var(--line);
 		}
 
@@ -230,10 +258,10 @@
 
 		.field label {
 			display: block;
-			padding: .55rem .65rem 0;
-			font-size: 9px;
-			font-weight: 700;
-			letter-spacing: .09em;
+			padding: .45rem .65rem 0;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .06em;
 			text-transform: uppercase;
 		}
 
@@ -241,47 +269,64 @@
 			display: block;
 			width: 100%;
 			min-width: 0;
-			padding: .42rem .65rem .7rem;
+			padding: .4rem .65rem .65rem;
 			background: transparent;
 			border: 0;
 			border-radius: 0;
 			color: var(--ink);
-			font-size: 15px;
+			font-size: 16px;
 			font-weight: 700;
 		}
 
-		input::placeholder { color: var(--muted); }
+		input::placeholder { color: var(--muted); opacity: .85; }
 
-		button {
-			min-width: 7rem;
-			padding: .75rem 1rem;
+		input:focus-visible { outline: 0; }
+
+		.field:focus-within,
+		.filter-field:focus-within {
+			background: var(--paper-raised);
+			box-shadow: inset 0 -3px 0 var(--ink);
+		}
+
+		.primary-button,
+		.secondary-button {
+			min-height: 2.75rem;
+			padding: .65rem .9rem;
+			border-radius: 0;
+			font-size: 11px;
+			font-weight: 800;
+			letter-spacing: .04em;
+			text-transform: uppercase;
+		}
+
+		.primary-button {
 			background: var(--ink);
 			border: 0;
 			border-left: 1px solid var(--line);
-			border-radius: 0;
 			color: var(--paper);
-			font-size: 11px;
-			font-weight: 800;
-			letter-spacing: .06em;
-			text-transform: uppercase;
-			cursor: pointer;
 		}
 
-		button:hover { background: var(--blue); }
-		button:active { background: var(--signal); }
+		.primary-button:hover { background: var(--blue); }
+		.primary-button:active { background: var(--signal); }
+
+		.secondary-button {
+			background: transparent;
+			border: 1px solid var(--line);
+		}
+
+		.secondary-button:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+		.secondary-button:active:not(:disabled) { background: var(--blue); }
 
 		.auth-note {
-			margin: 1rem 0 0;
-			padding: .6rem .65rem;
-			background: var(--paper);
-			border: 1px solid var(--line);
-			font-size: 10px;
+			margin: .65rem 0 0;
+			color: var(--muted);
+			font-size: 11px;
 		}
 
 		.status-strip {
 			display: grid;
 			grid-template-columns: 7rem minmax(0, 1fr) auto;
-			min-height: 3rem;
+			min-height: 3.25rem;
 			border-bottom: 1px solid var(--line);
 		}
 
@@ -289,7 +334,7 @@
 			display: flex;
 			align-items: center;
 			margin: 0;
-			padding: .65rem;
+			padding: .7rem;
 		}
 
 		.status-label {
@@ -298,7 +343,7 @@
 			border-right: 1px solid var(--line);
 			font-size: 10px;
 			font-weight: 800;
-			letter-spacing: .08em;
+			letter-spacing: .07em;
 			text-transform: uppercase;
 		}
 
@@ -309,23 +354,24 @@
 		.polling-note {
 			border-left: 1px solid var(--line);
 			color: var(--muted);
-			font-size: 9px;
-			letter-spacing: .06em;
-			text-transform: uppercase;
+			font-size: 10px;
+			white-space: nowrap;
 		}
 
 		.metrics {
 			display: grid;
 			grid-template-columns: repeat(4, 1fr);
+			margin: 0;
 			border-bottom: 1px solid var(--line);
 		}
 
 		.metric {
-			display: flex;
-			min-height: 7.5rem;
-			flex-direction: column;
-			justify-content: space-between;
-			padding: .7rem;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: .75rem;
+			align-items: center;
+			min-height: 4.75rem;
+			padding: .7rem .85rem;
 			border-right: 1px solid var(--line);
 		}
 
@@ -333,62 +379,81 @@
 
 		.metric dt {
 			color: var(--muted);
-			font-size: 9px;
-			font-weight: 700;
-			letter-spacing: .08em;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .06em;
 			text-transform: uppercase;
 		}
 
 		.metric dd {
 			margin: 0;
 			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(2.5rem, 5vw, 5rem);
+			font-size: 2.5rem;
 			font-weight: 900;
-			letter-spacing: -.035em;
-			line-height: .75;
+			line-height: 1;
 		}
 
-		.directory-head {
+		.directory-heading {
 			display: grid;
-			grid-template-columns: 7rem 1fr auto;
-			min-height: 4rem;
+			grid-template-columns: 7rem minmax(0, 1fr) minmax(14rem, 24rem) auto;
 			align-items: stretch;
 			border-bottom: 1px solid var(--line);
 		}
 
-		.directory-head > * {
+		.directory-heading h2 {
 			display: flex;
 			align-items: center;
 			margin: 0;
-			padding: .75rem;
-		}
-
-		.directory-head .section-code { font-size: 10px; }
-
-		.directory-head h2 {
-			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(1.8rem, 3vw, 3rem);
-			font-weight: 900;
-			letter-spacing: -.02em;
+			padding: .65rem .8rem;
+			font-size: clamp(1.65rem, 3vw, 2.5rem);
 			line-height: 1;
-			text-transform: uppercase;
 		}
 
-		.directory-key {
+		.filter-field {
+			display: flex;
+			min-width: 0;
+			align-items: center;
 			border-left: 1px solid var(--line);
-			font-size: 9px;
-			letter-spacing: .06em;
+		}
+
+		.filter-field label {
+			padding-left: .7rem;
+			color: var(--muted);
+			font-size: 10px;
+			font-weight: 800;
 			text-transform: uppercase;
 		}
 
-		#runners { min-height: 16rem; }
+		.filter-field input {
+			padding: .75rem .7rem;
+			font-size: 13px;
+		}
+
+		.directory-heading .secondary-button {
+			align-self: stretch;
+			border-block: 0;
+			border-right: 0;
+		}
+
+		.results-note {
+			min-height: 2.25rem;
+			margin: 0;
+			padding: .45rem .75rem;
+			background: var(--paper-raised);
+			border-bottom: 1px solid var(--line);
+			color: var(--muted);
+			font-size: 11px;
+		}
+
+		#runners { min-height: 14rem; }
 
 		.empty-state {
 			display: grid;
-			grid-template-columns: 7rem 1fr;
-			min-height: 16rem;
+			grid-template-columns: 7rem minmax(0, 1fr);
+			min-height: 14rem;
 			background:
-				repeating-linear-gradient(135deg, transparent 0 7px, #11120f10 7px 8px);
+				repeating-linear-gradient(135deg, transparent 0 8px, #11120f0a 8px 9px);
+			border-bottom: 1px solid var(--line);
 		}
 
 		.empty-code {
@@ -402,108 +467,153 @@
 
 		.empty-copy {
 			display: flex;
-			max-width: 50rem;
+			max-width: 48rem;
 			flex-direction: column;
-			justify-content: space-between;
-			padding: 1.2rem;
+			justify-content: center;
+			padding: 1.5rem;
 		}
 
 		.empty-copy strong {
-			max-width: 13ch;
 			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(2.4rem, 6vw, 6rem);
+			font-size: clamp(2rem, 5vw, 4rem);
 			font-weight: 900;
-			letter-spacing: -.035em;
-			line-height: .86;
+			letter-spacing: -.02em;
+			line-height: .9;
 			text-transform: uppercase;
 		}
 
 		.empty-copy p {
-			max-width: 46ch;
-			margin: 2rem 0 0;
+			max-width: 52ch;
+			margin: 1rem 0 0;
+			color: var(--muted);
 		}
 
 		.runner { border-bottom: 1px solid var(--line); }
 
-		.runner-heading {
+		.runner-header {
 			display: grid;
-			grid-template-columns: 7rem minmax(13rem, 1.4fr) repeat(3, minmax(10rem, .6fr));
-			min-height: 6.5rem;
+			grid-template-columns: 7rem minmax(12rem, 1fr) minmax(25rem, 1.4fr);
+			min-height: 5.5rem;
 		}
 
-		.runner-heading > * {
+		.runner-index {
 			display: flex;
-			min-width: 0;
 			flex-direction: column;
 			justify-content: space-between;
 			padding: .7rem;
-			border-right: 1px solid var(--line);
-		}
-
-		.runner-heading > *:last-child { border-right: 0; }
-
-		.runner-index {
 			background: var(--blue);
 			color: #fff;
 		}
 
-		.runner-index strong {
-			font-size: 2rem;
-			line-height: 1;
+		.runner-index strong { font-size: 1.7rem; line-height: 1; }
+
+		.runner-identity {
+			display: flex;
+			min-width: 0;
+			flex-direction: column;
+			justify-content: space-between;
+			padding: .7rem .85rem;
+			border-right: 1px solid var(--line);
 		}
 
-		.runner-id h3 {
+		.runner-name {
 			margin: 0;
 			overflow-wrap: anywhere;
-			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-			font-size: clamp(2rem, 4vw, 4rem);
-			font-weight: 900;
-			letter-spacing: -.03em;
-			line-height: .8;
+			font-size: clamp(1.8rem, 4vw, 3.25rem);
+			line-height: .9;
+		}
+
+		.runner-online {
+			display: inline-flex;
+			align-items: center;
+			gap: .45rem;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .06em;
 			text-transform: uppercase;
 		}
 
-		.data-label {
+		.runner-online::before {
+			width: .55rem;
+			height: .55rem;
+			background: var(--green);
+			border: 1px solid var(--ink);
+			content: "";
+		}
+
+		.runner-meta {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			margin: 0;
+		}
+
+		.runner-meta > div {
+			display: flex;
+			min-width: 0;
+			flex-direction: column;
+			justify-content: space-between;
+			gap: .5rem;
+			padding: .7rem;
+			border-right: 1px solid var(--line);
+		}
+
+		.runner-meta > div:last-child { border-right: 0; }
+
+		.runner-meta dt {
 			color: var(--muted);
-			font-size: 9px;
-			font-weight: 700;
-			letter-spacing: .08em;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .06em;
 			text-transform: uppercase;
 		}
 
-		.data-value {
+		.runner-meta dd {
+			margin: 0;
+			overflow-wrap: anywhere;
 			font-size: 12px;
 			font-weight: 700;
 		}
 
-		.session-table { width: 100%; }
-
-		.session-row {
-			display: grid;
-			grid-template-columns: 7rem minmax(12rem, 1.4fr) minmax(8rem, .6fr) minmax(10rem, .6fr);
+		.session-table {
+			width: 100%;
+			border-collapse: collapse;
 			border-top: 1px solid var(--line);
+			table-layout: fixed;
 		}
 
-		.session-row > * {
-			min-width: 0;
-			padding: .65rem .7rem;
+		.session-table th,
+		.session-table td {
+			padding: .65rem .75rem;
 			border-right: 1px solid var(--line);
+			text-align: left;
+			vertical-align: middle;
 		}
 
-		.session-row > *:last-child { border-right: 0; }
+		.session-table th:last-child,
+		.session-table td:last-child { border-right: 0; }
 
-		.session-row--head {
+		.session-table thead th {
 			background: var(--ink);
 			color: var(--paper);
-			font-size: 9px;
-			font-weight: 700;
-			letter-spacing: .08em;
+			font-size: 10px;
+			font-weight: 800;
+			letter-spacing: .07em;
 			text-transform: uppercase;
 		}
 
+		.session-table th:first-child,
+		.session-table td:first-child { width: 7rem; }
+		.session-table th:nth-child(3),
+		.session-table td:nth-child(3) { width: 10rem; }
+		.session-table th:nth-child(4),
+		.session-table td:nth-child(4) { width: 14rem; }
+
+		.session-table tbody tr + tr { border-top: 1px solid var(--line); }
+		.session-table tbody tr:hover { background: var(--paper-raised); }
+
 		.session-name {
 			overflow-wrap: anywhere;
-		font-weight: 800;
+			font-weight: 800;
 		}
 
 		.state {
@@ -512,7 +622,7 @@
 			gap: .5rem;
 			font-size: 10px;
 			font-weight: 800;
-			letter-spacing: .06em;
+			letter-spacing: .05em;
 			text-transform: uppercase;
 		}
 
@@ -528,178 +638,204 @@
 		.state[data-state="opening"]::before { background: var(--yellow); }
 
 		.runner-empty {
-			padding: 1rem .7rem 1rem 7.7rem;
+			margin: 0;
+			padding: 1rem .85rem 1rem 7.85rem;
 			border-top: 1px solid var(--line);
-			background: repeating-linear-gradient(135deg, transparent 0 7px, #11120f0c 7px 8px);
+			background: repeating-linear-gradient(135deg, transparent 0 8px, #11120f08 8px 9px);
 			color: var(--muted);
-			font-size: 10px;
-			text-transform: uppercase;
+			font-size: 11px;
 		}
 
 		footer {
 			display: grid;
-			grid-template-columns: 7rem minmax(0, 1fr) auto;
-			min-height: 5rem;
+			margin-top: auto;
+			grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+			min-height: 2.75rem;
 			background: var(--ink);
 			color: var(--paper);
 		}
 
 		footer > * {
 			display: flex;
-			align-items: flex-end;
+			align-items: center;
 			margin: 0;
-			padding: .7rem;
+			padding: .45rem .65rem;
 			border-right: 1px solid #e8e7df66;
 		}
 
 		footer > *:last-child { border-right: 0; }
-		footer p { max-width: 58ch; }
+		footer p { max-width: 64ch; font-size: 11px; }
 
 		.footer-build {
 			color: var(--yellow);
 			font-size: 10px;
-			font-weight: 700;
-			letter-spacing: .06em;
+			font-weight: 800;
+			letter-spacing: .05em;
 			text-transform: uppercase;
 		}
 
-		@keyframes pulse {
-			50% { opacity: .35; }
-		}
-
-		@media (max-width: 860px) {
-			.masthead { grid-template-columns: 1fr; }
-			.mast-meta { border-top: 1px solid var(--line); }
-			.meta-cell:first-child { border-left: 0; }
-			.intro { grid-template-columns: 1fr; }
-			.title-block { border-right: 0; border-bottom: 1px solid var(--line); }
+		@media (max-width: 900px) {
 			.metrics { grid-template-columns: repeat(2, 1fr); }
 			.metric:nth-child(2) { border-right: 0; }
 			.metric:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
-			.runner { overflow-x: auto; }
-			.runner-heading { min-width: 50rem; }
-			.session-table { min-width: 42rem; }
+			.directory-heading { grid-template-columns: 5rem minmax(0, 1fr) auto; }
+			.directory-heading .section-code { grid-row: 1 / 3; }
+			.filter-field { grid-column: 2 / 4; border-top: 1px solid var(--line); border-left: 0; }
+			.directory-heading .secondary-button { grid-column: 3; grid-row: 1; }
+			.runner-header { grid-template-columns: 5rem minmax(0, 1fr); }
+			.runner-meta { grid-column: 1 / -1; border-top: 1px solid var(--line); }
+			.runner-index { grid-row: 1; }
+			.runner-identity { border-right: 0; }
 		}
 
-		@media (max-width: 560px) {
-			.colorbar { width: 4rem; min-height: 4.75rem; }
-			.wordmark strong { font-size: 1.65rem; }
-			.mast-meta { grid-template-columns: 1fr 1fr; }
-			.meta-cell { min-height: 4rem; }
-			.utility-bar { grid-template-columns: 4rem 1fr; }
-			.utility-copy { border-right: 0; }
-			.system-health { display: none; }
-			.title-block { min-height: 15rem; }
-			h1 { font-size: clamp(3.5rem, 20vw, 6rem); }
-			.intro-copy { grid-template-columns: 4rem 1fr; }
-			.auth-panel { min-height: 14rem; }
-			.auth-panel form { grid-template-columns: 1fr; }
-			button { min-height: 3.2rem; border-top: 1px solid var(--line); border-left: 0; }
-			.status-strip { grid-template-columns: 4rem 1fr; }
-			.polling-note { display: none; }
+		@media (max-width: 640px) {
+			.masthead { position: static; grid-template-columns: 1fr; }
+			.colorbar { width: 3.5rem; }
+			.wordmark strong { font-size: 1.45rem; }
+			.header-state { border-top: 1px solid var(--line); }
+			.header-state > * { min-width: 0; border-left: 0; }
+			.header-state > * + * { border-left: 1px solid var(--line); }
+			.connection-popover { right: auto; left: 0; width: 100vw; max-width: calc(100vw - 1px); }
+			.auth-form { grid-template-columns: 1fr; }
+			.primary-button { border-top: 1px solid var(--line); border-left: 0; }
+			.status-strip { grid-template-columns: 4rem minmax(0, 1fr); }
+			.polling-note { grid-column: 2; padding-top: 0; border-left: 0; }
 			.metrics { grid-template-columns: 1fr 1fr; }
-			.metric { min-height: 6rem; }
-			.directory-head { grid-template-columns: 4rem 1fr; }
-			.directory-key { display: none; }
-			.empty-state { grid-template-columns: 4rem 1fr; }
-			footer { grid-template-columns: 4rem 1fr; }
-			.footer-build { grid-column: 1 / -1; border-top: 1px solid #e8e7df66; }
+			.metric { min-height: 4rem; padding: .6rem; }
+			.metric dd { font-size: 2rem; }
+			.directory-heading { grid-template-columns: 4rem minmax(0, 1fr); }
+			.directory-heading .secondary-button { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); border-left: 0; }
+			.filter-field { grid-column: 1 / -1; grid-row: 3; }
+			.empty-state { grid-template-columns: 4rem minmax(0, 1fr); }
+			.runner-header { grid-template-columns: 4rem minmax(0, 1fr); }
+			.runner-meta { grid-template-columns: 1fr; }
+			.runner-meta > div { min-height: 3.75rem; border-right: 0; border-bottom: 1px solid var(--line); }
+			.runner-meta > div:last-child { border-bottom: 0; }
+			.runner-empty { padding-left: 4.75rem; }
+
+			.session-table,
+			.session-table tbody,
+			.session-table tr,
+			.session-table tbody th,
+			.session-table td { display: block; width: 100%; }
+			.session-table thead {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip: rect(0, 0, 0, 0);
+				white-space: nowrap;
+			}
+			.session-table tbody tr { padding: .35rem 0; }
+			.session-table tbody tr + tr { border-top: 1px solid var(--line); }
+			.session-table tbody th,
+			.session-table td,
+			.session-table td:first-child,
+			.session-table td:nth-child(3),
+			.session-table td:nth-child(4) {
+				display: grid;
+				grid-template-columns: 8.5rem minmax(0, 1fr);
+				width: 100%;
+				padding: .35rem .75rem;
+				border-right: 0;
+			}
+			.session-table tbody th::before,
+			.session-table td::before {
+				color: var(--muted);
+				content: attr(data-label);
+				font-size: 10px;
+				font-weight: 800;
+				letter-spacing: .06em;
+				text-transform: uppercase;
+			}
+			footer { grid-template-columns: 3.5rem minmax(0, 1fr); min-height: 2.5rem; }
+			footer p { display: none; }
+			.footer-build { grid-column: auto; border-top: 0; }
 		}
 
 		@media (prefers-reduced-motion: reduce) {
-			*, *::before, *::after { animation: none !important; }
+			html { scroll-behavior: auto; }
 		}
 	</style>
 </head>
-<body data-authenticated="false">
+<body data-authenticated="false" data-connection="disconnected">
+	<a class="skip-link" href="#main-content">Skip to network state</a>
 	<div class="shell">
 		<header class="masthead">
 			<div class="brand">
 				<div class="colorbar" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
 				<div class="wordmark">
-					<strong>Pi Tower</strong>
-					<span class="eyebrow">Remote execution relay / network control</span>
+					<strong>Pi <span>Tower</span></strong>
+					<span class="eyebrow">Remote runner control</span>
 				</div>
 			</div>
-			<div class="mast-meta">
-				<div class="meta-cell">
-					<span class="eyebrow">Interface</span>
-					<strong>WEB–01 / STATE</strong>
-				</div>
-				<div class="meta-cell">
-					<span class="eyebrow">Tower time / local</span>
+			<div class="header-state">
+				<details class="connection-menu" id="auth-details" open>
+					<summary>
+						<span class="eyebrow">Connection</span>
+						<span class="connection-indicator" id="connection-indicator">Not connected</span>
+					</summary>
+					<div class="connection-popover">
+						<form class="auth-form" id="auth-form">
+							<div class="field">
+								<label for="token">Access token</label>
+								<input id="token" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="Enter tower token">
+							</div>
+							<button class="primary-button" type="submit">Connect</button>
+						</form>
+						<p class="auth-note" id="connection-summary">Token stays only in this page's memory.</p>
+					</div>
+				</details>
+				<div class="header-clock">
+					<span class="eyebrow">Local time</span>
 					<time id="clock" datetime="">00:00:00</time>
 				</div>
 			</div>
 		</header>
 
-		<div class="utility-bar">
-			<span class="section-code">00 <span>→</span></span>
-			<span class="utility-copy">Operational telemetry / Authorized access only</span>
-			<span class="system-health">Relay interface ready</span>
-		</div>
-
-		<main>
-			<section class="intro" aria-labelledby="page-title">
-				<div class="title-block">
-					<h1 id="page-title">Network<br><span>State</span></h1>
-					<div class="intro-copy">
-						<span class="eyebrow">Purpose</span>
-						<p>Observe every connected runner, exposed session, and attachment state through one direct control surface.</p>
-					</div>
-				</div>
-				<div class="auth-panel">
-					<div>
-						<span class="eyebrow">Authentication / Bearer</span>
-						<form id="auth-form">
-							<div class="field">
-								<label for="token">Tower access token</label>
-								<input id="token" name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="••••••••••••">
-							</div>
-							<button type="submit">Connect →</button>
-						</form>
-					</div>
-					<p class="auth-note">Credential remains in volatile page memory. State refreshes every 2,000 ms after authorization.</p>
-				</div>
-			</section>
-
+		<main id="main-content" tabindex="-1">
 			<section class="status-strip" aria-label="Connection status">
-				<span class="status-label">STAT <span>→</span></span>
-				<p id="status" role="status" aria-live="polite" data-kind="idle">Awaiting access token. Network data is sealed.</p>
-				<span class="polling-note" id="polling-note">Polling inactive</span>
+				<span class="status-label">Status <span aria-hidden="true">→</span></span>
+				<p id="status" role="status" aria-live="polite" data-kind="idle">Enter the tower token to load network state.</p>
+				<span class="polling-note" id="polling-note">Automatic refresh is off</span>
 			</section>
 
 			<dl class="metrics" aria-label="Network totals">
 				<div class="metric">
-					<dt>Connected runners / R</dt>
+					<dt>Online runners</dt>
 					<dd id="runner-count">00</dd>
 				</div>
 				<div class="metric">
-					<dt>Known sessions / S</dt>
+					<dt>Total sessions</dt>
 					<dd id="session-count">00</dd>
 				</div>
 				<div class="metric">
-					<dt>Attached / A</dt>
+					<dt>Attached clients</dt>
 					<dd id="attached-count">00</dd>
 				</div>
 				<div class="metric">
-					<dt>Opening / O</dt>
+					<dt>Opening now</dt>
 					<dd id="opening-count">00</dd>
 				</div>
 			</dl>
 
 			<section aria-labelledby="directory-title">
-				<header class="directory-head">
-					<span class="section-code">01 <span>→</span></span>
-					<h2 id="directory-title">Runner Directory</h2>
-					<span class="directory-key">ID / connection / uptime / sessions / state</span>
+				<header class="directory-heading">
+					<span class="section-code">01 <span aria-hidden="true">→</span></span>
+					<h2 id="directory-title">Runners</h2>
+					<div class="filter-field">
+						<label for="runner-filter">Filter</label>
+						<input id="runner-filter" type="search" maxlength="100" placeholder="Fuzzy match runner or session" disabled>
+					</div>
+					<button class="secondary-button" id="refresh-button" type="button" disabled>Refresh now</button>
 				</header>
+				<p class="results-note" id="results-note" aria-live="polite">Connect to view available runners.</p>
 				<div id="runners">
 					<div class="empty-state">
 						<span class="empty-code">R–000</span>
 						<div class="empty-copy">
-							<strong>State unavailable</strong>
-							<p>Submit the tower token to establish a read channel and enumerate online runners.</p>
+							<strong>Waiting for connection</strong>
+							<p>Enter the configured tower token above. Connected runners and their sessions will appear here.</p>
 						</div>
 					</div>
 				</div>
@@ -708,16 +844,22 @@
 
 		<footer>
 			<span>π/T</span>
-			<p>Pi Tower relays RPC frames between clients and isolated runner sessions. This interface presents live operational state only.</p>
-			<span class="footer-build">PI-TOWER STATE / UI REV. 02</span>
+			<p>Live operational state for Pi Tower runners and sessions.</p>
+			<span class="footer-build">PI-TOWER STATE / UI REV. 03</span>
 		</footer>
 	</div>
 
 	<script>
 		const form = document.querySelector("#auth-form");
+		const authDetails = document.querySelector("#auth-details");
 		const input = document.querySelector("#token");
 		const status = document.querySelector("#status");
 		const pollingNote = document.querySelector("#polling-note");
+		const connectionIndicator = document.querySelector("#connection-indicator");
+		const connectionSummary = document.querySelector("#connection-summary");
+		const filterInput = document.querySelector("#runner-filter");
+		const refreshButton = document.querySelector("#refresh-button");
+		const resultsNote = document.querySelector("#results-note");
 		const container = document.querySelector("#runners");
 		const counts = {
 			runners: document.querySelector("#runner-count"),
@@ -728,12 +870,13 @@
 		let token = "";
 		let timer;
 		let pollId = 0;
+		let latestData = { runners: [] };
 
 		const padCount = (value) => String(value).padStart(2, "0");
 		const dateTime = (value) => new Intl.DateTimeFormat(undefined, {
 			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
+			month: "short",
+			day: "numeric",
 			hour: "2-digit",
 			minute: "2-digit",
 			second: "2-digit",
@@ -743,12 +886,23 @@
 			const days = Math.floor(seconds / 86400);
 			const hours = Math.floor((seconds % 86400) / 3600);
 			const minutes = Math.floor((seconds % 3600) / 60);
-			return `${days ? `${days}D ` : ""}${String(hours).padStart(2, "0")}H ${String(minutes).padStart(2, "0")}M`;
+			return `${days ? `${days}d ` : ""}${hours}h ${minutes}m`;
 		};
 
 		function setStatus(message, kind = "idle") {
-			status.textContent = message;
+			if (status.textContent !== message) status.textContent = message;
 			status.dataset.kind = kind;
+		}
+
+		function setConnection(state) {
+			document.body.dataset.connection = state;
+			const settings = {
+				disconnected: ["Not connected", "Token required"],
+				connecting: ["Connecting", "Checking token…"],
+				connected: ["Connected", "Connected · open to change token"],
+				degraded: ["Reconnecting", "Connection interrupted · retrying"],
+			};
+			[connectionIndicator.textContent, connectionSummary.textContent] = settings[state];
 		}
 
 		function setCounts(runners = []) {
@@ -757,26 +911,6 @@
 			counts.sessions.textContent = padCount(sessions.length);
 			counts.attached.textContent = padCount(sessions.filter((session) => session.state === "attached").length);
 			counts.opening.textContent = padCount(sessions.filter((session) => session.state === "opening").length);
-		}
-
-		function createCell(label, value) {
-			const cell = document.createElement("div");
-			const key = document.createElement("span");
-			const data = document.createElement("span");
-			key.className = "data-label";
-			data.className = "data-value";
-			key.textContent = label;
-			data.textContent = value;
-			cell.append(key, data);
-			return cell;
-		}
-
-		function createState(state) {
-			const badge = document.createElement("span");
-			badge.className = "state";
-			badge.dataset.state = state;
-			badge.textContent = state;
-			return badge;
 		}
 
 		function renderEmpty(title, message, code = "R–000") {
@@ -796,96 +930,257 @@
 			container.replaceChildren(empty);
 		}
 
-		function render(data) {
+		function normalizeSearch(value) {
+			return value
+				.normalize("NFKD")
+				.replace(/[\u0300-\u036f]/g, "")
+				.toLowerCase()
+				.trim();
+		}
+
+		function compactSearch(value) {
+			return normalizeSearch(value).replace(/[\s\-_./]+/g, "");
+		}
+
+		function editDistance(left, right) {
+			let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+			for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+				const current = [leftIndex + 1];
+				for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+					current.push(Math.min(
+						current[rightIndex] + 1,
+						previous[rightIndex + 1] + 1,
+						previous[rightIndex] + (left[leftIndex] === right[rightIndex] ? 0 : 1),
+					));
+				}
+				previous = current;
+			}
+			return previous[right.length];
+		}
+
+		function fuzzyTermScore(term, candidate) {
+			const needle = compactSearch(term);
+			const normalizedCandidate = normalizeSearch(candidate);
+			const haystack = compactSearch(candidate);
+			if (!needle || !haystack) return null;
+
+			const exactIndex = haystack.indexOf(needle);
+			let bestScore = exactIndex < 0
+				? null
+				: 2000 - exactIndex * 5 - Math.max(0, haystack.length - needle.length);
+
+			let cursor = -1;
+			let firstMatch = 0;
+			let previousMatch = -2;
+			let subsequenceScore = 1200;
+			for (let index = 0; index < needle.length; index += 1) {
+				const match = haystack.indexOf(needle[index], cursor + 1);
+				if (match < 0) {
+					subsequenceScore = null;
+					break;
+				}
+				if (index === 0) firstMatch = match;
+				subsequenceScore += match === previousMatch + 1 ? 30 : 12;
+				subsequenceScore -= Math.max(0, match - previousMatch - 1) * 3;
+				cursor = match;
+				previousMatch = match;
+			}
+			if (subsequenceScore !== null) {
+				subsequenceScore -= firstMatch * 4 + Math.max(0, haystack.length - needle.length);
+				bestScore = Math.max(bestScore ?? -Infinity, subsequenceScore);
+			}
+
+			const tolerance = needle.length <= 2 ? 0 : needle.length <= 5 ? 1 : 2;
+			const words = normalizedCandidate.split(/[\s\-_./]+/).filter(Boolean);
+			words.forEach((word, wordIndex) => {
+				const compactWord = compactSearch(word);
+				if (Math.abs(compactWord.length - needle.length) > tolerance) return;
+				const distance = editDistance(needle, compactWord);
+				if (distance > tolerance) return;
+				const score = 900 - distance * 120 - wordIndex * 4;
+				bestScore = Math.max(bestScore ?? -Infinity, score);
+			});
+
+			return bestScore;
+		}
+
+		function fuzzyScore(query, candidate) {
+			const terms = normalizeSearch(query).split(/[\s\-_./]+/).filter(Boolean);
+			if (!terms.length) return null;
+			const scores = terms.map((term) => fuzzyTermScore(term, candidate));
+			return scores.some((score) => score === null)
+				? null
+				: scores.reduce((total, score) => total + score, 0);
+		}
+
+		function visibleRunners(runners) {
+			const query = filterInput.value.trim();
+			if (!query) return runners;
+
+			return runners
+				.map((runner, index) => {
+					const runnerScore = fuzzyScore(query, runner.id);
+					const sessionMatches = runner.sessions
+						.map((session) => ({ session, score: fuzzyScore(query, session.name) }))
+						.filter(({ score }) => score !== null)
+						.sort((left, right) => right.score - left.score);
+					if (runnerScore === null && !sessionMatches.length) return null;
+					return {
+						index,
+						score: Math.max(runnerScore ?? -Infinity, sessionMatches[0]?.score ?? -Infinity),
+						runner: runnerScore === null
+							? { ...runner, sessions: sessionMatches.map(({ session }) => session) }
+							: runner,
+					};
+				})
+				.filter(Boolean)
+				.sort((left, right) => right.score - left.score || left.index - right.index)
+				.map(({ runner }) => runner);
+		}
+
+		function createMeta(label, value, dateValue) {
+			const wrapper = document.createElement("div");
+			const term = document.createElement("dt");
+			const description = document.createElement("dd");
+			term.textContent = label;
+			if (dateValue) {
+				const time = document.createElement("time");
+				time.dateTime = dateValue;
+				time.textContent = value;
+				description.append(time);
+			} else {
+				description.textContent = value;
+			}
+			wrapper.append(term, description);
+			return wrapper;
+		}
+
+		function createSessionTable(runner) {
+			const table = document.createElement("table");
+			table.className = "session-table";
+			const caption = document.createElement("caption");
+			caption.className = "visually-hidden";
+			caption.textContent = `Sessions on ${runner.id}`;
+			const head = document.createElement("thead");
+			const headRow = document.createElement("tr");
+			for (const label of ["Index", "Session", "State", "Meaning"]) {
+				const cell = document.createElement("th");
+				cell.scope = "col";
+				cell.textContent = label;
+				headRow.append(cell);
+			}
+			head.append(headRow);
+			const body = document.createElement("tbody");
+
+			runner.sessions.forEach((session, sessionIndex) => {
+				const row = document.createElement("tr");
+				const values = [
+					[`S${padCount(sessionIndex + 1)}`, "Index"],
+					[session.name, "Session"],
+					[session.state, "State"],
+					[session.state === "attached" ? "Client attached" : session.state === "opening" ? "Opening session" : "Ready for a client", "Meaning"],
+				];
+				values.forEach(([value, label], cellIndex) => {
+					const cell = document.createElement(cellIndex === 1 ? "th" : "td");
+					cell.dataset.label = label;
+					if (cellIndex === 1) {
+						cell.scope = "row";
+						cell.className = "session-name";
+					}
+					if (cellIndex === 2) {
+						const badge = document.createElement("span");
+						badge.className = "state";
+						badge.dataset.state = session.state;
+						badge.textContent = value;
+						cell.append(badge);
+					} else {
+						cell.textContent = value;
+					}
+					row.append(cell);
+				});
+				body.append(row);
+			});
+			table.append(caption, head, body);
+			return table;
+		}
+
+		function renderDirectory(data) {
 			container.replaceChildren();
-			setCounts(data.runners);
-			if (!data.runners.length) {
-				setStatus("Authorized. No runners are connected to the relay.", "success");
-				renderEmpty("No signal received", "The state channel is open, but no remote runners are currently registered.", "R–Ø");
+			const runners = visibleRunners(data.runners);
+			const hasFilter = Boolean(filterInput.value.trim());
+			resultsNote.textContent = hasFilter
+				? `${runners.length} of ${data.runners.length} runners match the filter.`
+				: `${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} shown.`;
+
+			if (!runners.length) {
+				if (hasFilter && data.runners.length) {
+					renderEmpty("No matches", "Try a different runner or session name.", "R–Ø");
+				} else {
+					renderEmpty("No runners online", "The tower is connected, but no remote runners are registered right now.", "R–Ø");
+				}
 				return;
 			}
 
-			const sessionTotal = data.runners.reduce((total, runner) => total + runner.sessions.length, 0);
-			setStatus(`Authorized. ${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} and ${sessionTotal} session${sessionTotal === 1 ? "" : "s"} indexed.`, "success");
-
-			data.runners.forEach((runner, runnerIndex) => {
+			runners.forEach((runner, runnerIndex) => {
 				const card = document.createElement("article");
 				card.className = "runner";
+				card.setAttribute("aria-labelledby", `runner-${runnerIndex}`);
 
 				const heading = document.createElement("header");
-				heading.className = "runner-heading";
+				heading.className = "runner-header";
 				const index = document.createElement("div");
 				index.className = "runner-index";
 				const indexLabel = document.createElement("span");
-				indexLabel.className = "data-label";
+				indexLabel.className = "eyebrow";
 				indexLabel.textContent = "Runner";
 				const indexValue = document.createElement("strong");
 				indexValue.textContent = `R${padCount(runnerIndex + 1)}`;
 				index.append(indexLabel, indexValue);
 
 				const identity = document.createElement("div");
-				identity.className = "runner-id";
-				const identityLabel = document.createElement("span");
-				identityLabel.className = "data-label";
-				identityLabel.textContent = "Node identifier";
+				identity.className = "runner-identity";
+				const online = document.createElement("span");
+				online.className = "runner-online";
+				online.textContent = "Online";
 				const title = document.createElement("h3");
+				title.className = "runner-name";
+				title.id = `runner-${runnerIndex}`;
 				title.textContent = runner.id;
-				identity.append(identityLabel, title);
+				identity.append(online, title);
 
-				heading.append(
-					index,
-					identity,
-					createCell("Connection state", "ONLINE / READY"),
-					createCell("Connected at", dateTime(runner.connectedAt)),
-					createCell("Elapsed uptime", elapsed(runner.connectedAt)),
+				const metadata = document.createElement("dl");
+				metadata.className = "runner-meta";
+				metadata.append(
+					createMeta("Connected", dateTime(runner.connectedAt), runner.connectedAt),
+					createMeta("Uptime", elapsed(runner.connectedAt)),
+					createMeta("Sessions", String(runner.sessions.length)),
 				);
+				heading.append(index, identity, metadata);
 				card.append(heading);
 
-				if (!runner.sessions.length) {
-					const empty = document.createElement("div");
-					empty.className = "runner-empty";
-					empty.textContent = "Session inventory empty / runner control channel only";
-					card.append(empty);
+				if (runner.sessions.length) {
+					card.append(createSessionTable(runner));
 				} else {
-					const table = document.createElement("div");
-					table.className = "session-table";
-					table.setAttribute("role", "table");
-					table.setAttribute("aria-label", `Sessions on ${runner.id}`);
-
-					const tableHead = document.createElement("div");
-					tableHead.className = "session-row session-row--head";
-					tableHead.setAttribute("role", "row");
-					for (const label of ["Index", "Session identifier", "Pipe state", "Client condition"]) {
-						const cell = document.createElement("span");
-						cell.setAttribute("role", "columnheader");
-						cell.textContent = label;
-						tableHead.append(cell);
-					}
-					table.append(tableHead);
-
-					runner.sessions.forEach((session, sessionIndex) => {
-						const row = document.createElement("div");
-						row.className = "session-row";
-						row.setAttribute("role", "row");
-						const sessionCode = document.createElement("span");
-						sessionCode.setAttribute("role", "cell");
-						sessionCode.textContent = `S${padCount(sessionIndex + 1)}`;
-						const sessionName = document.createElement("span");
-						sessionName.className = "session-name";
-						sessionName.setAttribute("role", "rowheader");
-						sessionName.textContent = session.name;
-						const state = createState(session.state);
-						state.setAttribute("role", "cell");
-						const condition = document.createElement("span");
-						condition.setAttribute("role", "cell");
-						condition.textContent = session.state === "attached" ? "CLIENT ATTACHED" : session.state === "opening" ? "PIPE NEGOTIATING" : "STANDING BY";
-						row.append(sessionCode, sessionName, state, condition);
-						table.append(row);
-					});
-					card.append(table);
+					const empty = document.createElement("p");
+					empty.className = "runner-empty";
+					empty.textContent = "No sessions on this runner. The control connection is ready.";
+					card.append(empty);
 				}
 				container.append(card);
 			});
+		}
+
+		function render(data) {
+			latestData = data;
+			setCounts(data.runners);
+			renderDirectory(data);
+			const sessionTotal = data.runners.reduce((total, runner) => total + runner.sessions.length, 0);
+			setStatus(
+				data.runners.length
+					? `${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} online with ${sessionTotal} session${sessionTotal === 1 ? "" : "s"}.`
+					: "Connected. No runners are online.",
+				"success",
+			);
 		}
 
 		async function poll(id) {
@@ -898,24 +1193,34 @@
 				if (response.status === 401) {
 					token = "";
 					document.body.dataset.authenticated = "false";
+					setConnection("disconnected");
 					setCounts();
-					setStatus("Authorization rejected. Verify the tower access token.", "error");
-					pollingNote.textContent = "Polling halted / HTTP 401";
-					renderEmpty("Access denied", "The relay refused this credential. Enter the configured tower token and retry.", "E–401");
+					filterInput.disabled = true;
+					refreshButton.disabled = true;
+					setStatus("That token was not accepted. Check it and try again.", "error");
+					pollingNote.textContent = "Automatic refresh is off";
+					resultsNote.textContent = "Connect to view available runners.";
+					renderEmpty("Access denied", "Enter the tower's configured access token and try again.", "E–401");
+					authDetails.open = true;
 					input.focus();
 					return;
 				}
-				if (!response.ok) throw new Error(`State request failed / HTTP ${response.status}`);
+				if (!response.ok) throw new Error(`State request failed (HTTP ${response.status}).`);
 				const data = await response.json();
 				if (id !== pollId) return;
+				const wasAuthenticated = document.body.dataset.authenticated === "true";
 				document.body.dataset.authenticated = "true";
+				setConnection("connected");
+				filterInput.disabled = false;
+				refreshButton.disabled = false;
 				render(data);
-				pollingNote.textContent = `Last sample ${new Date().toLocaleTimeString()} / 2S cycle`;
+				pollingNote.textContent = `Updated ${new Date().toLocaleTimeString()} · every 2 seconds`;
+				if (!wasAuthenticated) authDetails.open = false;
 			} catch (error) {
 				if (id !== pollId) return;
-				document.body.dataset.authenticated = "false";
+				setConnection("degraded");
 				setStatus(error instanceof Error ? error.message : "Unable to read network state.", "error");
-				pollingNote.textContent = "Polling degraded / retry scheduled";
+				pollingNote.textContent = "Retrying automatically";
 			}
 			if (token) timer = setTimeout(() => poll(id), 2000);
 		}
@@ -926,11 +1231,30 @@
 			const id = ++pollId;
 			token = input.value;
 			input.value = "";
-			document.body.dataset.authenticated = "false";
-			setCounts();
-			setStatus("Opening authenticated state channel…", "idle");
-			pollingNote.textContent = "Negotiating / request 001";
-			renderEmpty("Reading network", "Authorization is in progress. The runner directory will populate after the first state sample.", "TX–01");
+			setConnection("connecting");
+			setStatus("Checking the token and loading network state…");
+			pollingNote.textContent = "Connecting";
+			poll(id);
+		});
+
+		document.addEventListener("pointerdown", (event) => {
+			if (authDetails.open && !authDetails.contains(event.target)) authDetails.open = false;
+		});
+
+		document.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape" || !authDetails.open) return;
+			authDetails.open = false;
+			authDetails.querySelector("summary").focus();
+		});
+
+		filterInput.addEventListener("input", () => renderDirectory(latestData));
+
+		refreshButton.addEventListener("click", () => {
+			if (!token) return;
+			clearTimeout(timer);
+			const id = ++pollId;
+			setStatus("Refreshing network state…");
+			pollingNote.textContent = "Refreshing now";
 			poll(id);
 		});
 
