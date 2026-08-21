@@ -18,6 +18,7 @@
 			--blue: #1753d1;
 			--cyan: #42c7d9;
 			--green: #126b37;
+			--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 			font-family: "SFMono-Regular", "Roboto Mono", "Liberation Mono", Menlo, Consolas, monospace;
 			font-synthesis: none;
 		}
@@ -400,12 +401,18 @@
 			border-bottom: 1px solid var(--line);
 		}
 
-		.directory-heading h2 {
+		.directory-title {
 			display: flex;
-			align-items: center;
+			min-width: 0;
+			flex-direction: column;
+			justify-content: center;
+			gap: .15rem;
+			padding: .55rem .8rem;
+		}
+
+		.directory-heading h2 {
 			margin: 0;
-			padding: .65rem .8rem;
-			font-size: clamp(1.65rem, 3vw, 2.5rem);
+			font-size: clamp(1.4rem, 2.4vw, 2rem);
 			line-height: 1;
 		}
 
@@ -436,13 +443,10 @@
 		}
 
 		.results-note {
-			min-height: 2.25rem;
 			margin: 0;
-			padding: .45rem .75rem;
-			background: var(--paper-raised);
-			border-bottom: 1px solid var(--line);
 			color: var(--muted);
-			font-size: 11px;
+			font-size: 10px;
+			line-height: 1.2;
 		}
 
 		#runners { min-height: 14rem; }
@@ -488,40 +492,72 @@
 			color: var(--muted);
 		}
 
-		.runner { border-bottom: 1px solid var(--line); }
-
-		.runner-header {
+		.runner-grid {
 			display: grid;
-			grid-template-columns: 7rem minmax(12rem, 1fr) minmax(25rem, 1.4fr);
-			min-height: 5.5rem;
+			grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+			gap: .75rem;
+			padding: .75rem;
+			background: var(--paper-raised);
+			border-bottom: 1px solid var(--line);
+		}
+
+		.runner-card {
+			position: relative;
+			height: 11.5rem;
+			min-width: 0;
+			overflow: hidden;
+			align-self: start;
+			background: var(--paper);
+			border: 1px solid var(--line);
+		}
+
+		.runner-card[data-expanded="true"] {
+			background: var(--paper-raised);
+			box-shadow: inset 0 -5px 0 var(--blue);
+		}
+
+		.runner-block {
+			display: flex;
+			width: 100%;
+			height: 100%;
+			min-width: 0;
+			flex-direction: column;
+			padding: 0;
+			appearance: none;
+			background: transparent;
+			border: 0;
+			border-radius: 0;
+			text-align: left;
+		}
+
+		.runner-block:hover { background: var(--paper-raised); }
+
+		.runner-block-top {
+			display: grid;
+			grid-template-columns: 3.75rem minmax(0, 1fr);
+			min-height: 3.5rem;
+			border-bottom: 1px solid var(--line);
 		}
 
 		.runner-index {
 			display: flex;
 			flex-direction: column;
 			justify-content: space-between;
-			padding: .7rem;
+			padding: .45rem;
 			background: var(--blue);
 			color: #fff;
 		}
 
 		.runner-index .eyebrow { color: #fff; }
-		.runner-index strong { font-size: 1.7rem; line-height: 1; }
+		.runner-index strong { font-size: 1.3rem; line-height: 1; }
 
-		.runner-identity {
+		.runner-presence {
 			display: flex;
 			min-width: 0;
 			flex-direction: column;
 			justify-content: space-between;
-			padding: .7rem .85rem;
-			border-right: 1px solid var(--line);
-		}
-
-		.runner-name {
-			margin: 0;
-			overflow-wrap: anywhere;
-			font-size: clamp(1.8rem, 4vw, 3.25rem);
-			line-height: .9;
+			align-items: flex-start;
+			padding: .45rem .55rem;
 		}
 
 		.runner-online {
@@ -542,94 +578,211 @@
 			content: "";
 		}
 
-		.runner-meta {
-			display: grid;
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-			margin: 0;
+		.runner-connected {
+			max-width: 100%;
+			overflow: hidden;
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 700;
+			text-overflow: ellipsis;
+			text-transform: uppercase;
+			white-space: nowrap;
 		}
 
-		.runner-meta > div {
+		.runner-identity {
 			display: flex;
 			min-width: 0;
+			flex: 1 1 auto;
 			flex-direction: column;
 			justify-content: space-between;
 			gap: .5rem;
-			padding: .7rem;
-			border-right: 1px solid var(--line);
+			padding: .65rem;
 		}
 
-		.runner-meta > div:last-child { border-right: 0; }
-
-		.runner-meta dt {
-			color: var(--muted);
-			font-size: 10px;
-			font-weight: 800;
-			letter-spacing: .06em;
-			text-transform: uppercase;
-		}
-
-		.runner-meta dd {
+		.runner-name {
+			display: -webkit-box;
 			margin: 0;
+			overflow: hidden;
+			-webkit-box-orient: vertical;
+			-webkit-line-clamp: 2;
 			overflow-wrap: anywhere;
-			font-size: 12px;
-			font-weight: 700;
+			font-size: clamp(1.45rem, 2vw, 2rem);
+			line-height: .9;
 		}
 
-		.session-table {
-			width: 100%;
-			border-collapse: collapse;
-			border-top: 1px solid var(--line);
-			table-layout: fixed;
-		}
-
-		.session-table th,
-		.session-table td {
-			padding: .65rem .75rem;
-			border-right: 1px solid var(--line);
-			text-align: left;
-			vertical-align: middle;
-		}
-
-		.session-table th:last-child,
-		.session-table td:last-child { border-right: 0; }
-
-		.session-table thead th {
-			background: var(--ink);
-			color: var(--paper);
-			font-size: 10px;
-			font-weight: 800;
-			letter-spacing: .07em;
-			text-transform: uppercase;
-		}
-
-		.session-table th:first-child,
-		.session-table td:first-child { width: 7rem; }
-		.session-table th:nth-child(3),
-		.session-table td:nth-child(3) { width: 10rem; }
-		.session-table th:nth-child(4),
-		.session-table td:nth-child(4) { width: 14rem; }
-
-		.session-table tbody tr + tr { border-top: 1px solid var(--line); }
-		.session-table tbody tr:hover { background: var(--paper-raised); }
-
-		.session-name {
-			overflow-wrap: anywhere;
-			font-weight: 800;
-		}
-
-		.state {
-			display: inline-flex;
-			align-items: center;
-			gap: .5rem;
+		.runner-action {
+			color: var(--muted);
 			font-size: 10px;
 			font-weight: 800;
 			letter-spacing: .05em;
 			text-transform: uppercase;
 		}
 
+		.runner-card[data-expanded="true"] .runner-action { color: var(--blue); }
+
+		.runner-stats {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			border-top: 1px solid var(--line);
+		}
+
+		.runner-stat {
+			display: flex;
+			min-width: 0;
+			min-height: 3.25rem;
+			flex-direction: column;
+			justify-content: space-between;
+			gap: .25rem;
+			padding: .4rem;
+			border-right: 1px solid var(--line);
+		}
+
+		.runner-stat:last-child { border-right: 0; }
+
+		.runner-stat[data-populated="true"] {
+			background: var(--ink);
+			color: var(--paper);
+		}
+
+		.runner-stat[data-populated="true"] .runner-stat-label { color: var(--paper); }
+
+		.runner-stat-label {
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 800;
+			letter-spacing: .05em;
+			text-transform: uppercase;
+		}
+
+		.runner-stat-value {
+			margin: 0;
+			overflow-wrap: anywhere;
+			font-size: 12px;
+			font-weight: 800;
+		}
+
+		.runner-sessions {
+			position: absolute;
+			z-index: 1;
+			inset: 0;
+			display: flex;
+			min-height: 0;
+			flex-direction: column;
+			transform: translateY(0);
+			background: var(--paper);
+		}
+
+		.runner-card[data-entering="true"] .runner-sessions {
+			transition: transform 220ms var(--ease-out);
+		}
+
+		@starting-style {
+			.runner-card[data-entering="true"] .runner-sessions { transform: translateY(100%); }
+		}
+
+		.runner-sessions:focus-visible {
+			outline: 3px solid var(--blue);
+			outline-offset: -3px;
+		}
+
+		.runner-sessions-runner {
+			display: grid;
+			min-height: 2rem;
+			grid-template-columns: 3.75rem minmax(0, 1fr);
+			flex: 0 0 2rem;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.runner-sessions-runner-index {
+			display: flex;
+			align-items: center;
+			padding: .3rem .45rem;
+			background: var(--blue);
+			color: #fff;
+			font-size: 10px;
+			font-weight: 800;
+		}
+
+		.runner-sessions-runner-name {
+			min-width: 0;
+			padding: .3rem .55rem;
+			overflow: hidden;
+			font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+			font-size: 13px;
+			font-weight: 900;
+			letter-spacing: -.01em;
+			line-height: 1.35;
+			text-overflow: ellipsis;
+			text-transform: uppercase;
+			white-space: nowrap;
+		}
+
+		.runner-sessions-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			flex: 0 0 auto;
+			padding: .35rem .55rem;
+			background: var(--ink);
+			color: var(--paper);
+			font-size: 9px;
+			font-weight: 800;
+			letter-spacing: .06em;
+			text-transform: uppercase;
+		}
+
+		.runner-session-list {
+			min-height: 0;
+			margin: 0;
+			flex: 1 1 auto;
+			padding: 0;
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			list-style: none;
+			scrollbar-color: var(--ink) var(--paper);
+			scrollbar-width: thin;
+		}
+
+		.runner-session {
+			display: grid;
+			height: 2.35rem;
+			grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+			gap: .45rem;
+			align-items: center;
+			padding: .4rem .55rem;
+		}
+
+		.runner-session + .runner-session { border-top: 1px solid var(--line); }
+
+		.runner-session-index {
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 800;
+		}
+
+		.session-name {
+			min-width: 0;
+			overflow: hidden;
+			font-size: 11px;
+			font-weight: 800;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.state {
+			display: inline-flex;
+			align-items: center;
+			gap: .35rem;
+			font-size: 9px;
+			font-weight: 800;
+			letter-spacing: .04em;
+			text-transform: uppercase;
+			white-space: nowrap;
+		}
+
 		.state::before {
-			width: .58rem;
-			height: .58rem;
+			width: .48rem;
+			height: .48rem;
 			background: var(--muted);
 			border: 1px solid currentColor;
 			content: "";
@@ -638,13 +791,14 @@
 		.state[data-state="attached"]::before { background: var(--green); }
 		.state[data-state="opening"]::before { background: var(--yellow); }
 
-		.runner-empty {
+		.runner-session-empty {
+			min-height: 0;
 			margin: 0;
-			padding: 1rem .85rem 1rem 7.85rem;
-			border-top: 1px solid var(--line);
+			padding: .65rem .55rem;
+			flex: 1 1 auto;
 			background: repeating-linear-gradient(135deg, transparent 0 8px, #11120f08 8px 9px);
 			color: var(--muted);
-			font-size: 11px;
+			font-size: 10px;
 		}
 
 		footer {
@@ -683,10 +837,7 @@
 			.directory-heading .section-code { grid-row: 1 / 3; }
 			.filter-field { grid-column: 2 / 4; border-top: 1px solid var(--line); border-left: 0; }
 			.directory-heading .secondary-button { grid-column: 3; grid-row: 1; }
-			.runner-header { grid-template-columns: 5rem minmax(0, 1fr); }
-			.runner-meta { grid-column: 1 / -1; border-top: 1px solid var(--line); }
-			.runner-index { grid-row: 1; }
-			.runner-identity { border-right: 0; }
+
 		}
 
 		@media (max-width: 640px) {
@@ -708,47 +859,7 @@
 			.directory-heading .secondary-button { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); border-left: 0; }
 			.filter-field { grid-column: 1 / -1; grid-row: 3; }
 			.empty-state { grid-template-columns: 4rem minmax(0, 1fr); }
-			.runner-header { grid-template-columns: 4rem minmax(0, 1fr); }
-			.runner-meta { grid-template-columns: 1fr; }
-			.runner-meta > div { min-height: 3.75rem; border-right: 0; border-bottom: 1px solid var(--line); }
-			.runner-meta > div:last-child { border-bottom: 0; }
-			.runner-empty { padding-left: 4.75rem; }
-
-			.session-table,
-			.session-table tbody,
-			.session-table tr,
-			.session-table tbody th,
-			.session-table td { display: block; width: 100%; }
-			.session-table thead {
-				position: absolute;
-				width: 1px;
-				height: 1px;
-				overflow: hidden;
-				clip: rect(0, 0, 0, 0);
-				white-space: nowrap;
-			}
-			.session-table tbody tr { padding: .35rem 0; }
-			.session-table tbody tr + tr { border-top: 1px solid var(--line); }
-			.session-table tbody th,
-			.session-table td,
-			.session-table td:first-child,
-			.session-table td:nth-child(3),
-			.session-table td:nth-child(4) {
-				display: grid;
-				grid-template-columns: 8.5rem minmax(0, 1fr);
-				width: 100%;
-				padding: .35rem .75rem;
-				border-right: 0;
-			}
-			.session-table tbody th::before,
-			.session-table td::before {
-				color: var(--muted);
-				content: attr(data-label);
-				font-size: 10px;
-				font-weight: 800;
-				letter-spacing: .06em;
-				text-transform: uppercase;
-			}
+			.runner-grid { gap: .6rem; padding: .6rem; }
 			footer { grid-template-columns: 3.5rem minmax(0, 1fr); min-height: 2.5rem; }
 			footer p { display: none; }
 			.footer-build { grid-column: auto; border-top: 0; }
@@ -756,6 +867,18 @@
 
 		@media (prefers-reduced-motion: reduce) {
 			html { scroll-behavior: auto; }
+
+			.runner-card[data-entering="true"] .runner-sessions {
+				transform: none;
+				transition: opacity 160ms ease;
+			}
+
+			@starting-style {
+				.runner-card[data-entering="true"] .runner-sessions {
+					transform: none;
+					opacity: 0;
+				}
+			}
 		}
 	</style>
 </head>
@@ -822,15 +945,17 @@
 
 			<section aria-labelledby="directory-title">
 				<header class="directory-heading">
-					<span class="section-code">01 <span aria-hidden="true">→</span></span>
-					<h2 id="directory-title">Runners</h2>
+					<span class="section-code" aria-hidden="true"></span>
+					<div class="directory-title">
+						<h2 id="directory-title">Runners</h2>
+						<p class="results-note" id="results-note" aria-live="polite">Connect to view available runners.</p>
+					</div>
 					<div class="filter-field">
 						<label for="runner-filter">Filter</label>
 						<input id="runner-filter" type="search" maxlength="100" placeholder="Fuzzy match runner or session" disabled>
 					</div>
 					<button class="secondary-button" id="refresh-button" type="button" disabled>Refresh now</button>
 				</header>
-				<p class="results-note" id="results-note" aria-live="polite">Connect to view available runners.</p>
 				<div id="runners">
 					<div class="empty-state">
 						<span class="empty-code">R–000</span>
@@ -872,6 +997,10 @@
 		let timer;
 		let pollId = 0;
 		let latestData = { runners: [] };
+		let selectedRunnerId = null;
+		let expandingRunnerId = null;
+		let collapsingRunnerId = null;
+		let collapsingSessionsAnimation = null;
 
 		const padCount = (value) => String(value).padStart(2, "0");
 		const dateTime = (value) => new Intl.DateTimeFormat(undefined, {
@@ -1039,73 +1168,233 @@
 				.map(({ runner }) => runner);
 		}
 
-		function createMeta(label, value, dateValue) {
-			const wrapper = document.createElement("div");
-			const term = document.createElement("dt");
-			const description = document.createElement("dd");
-			term.textContent = label;
-			if (dateValue) {
-				const time = document.createElement("time");
-				time.dateTime = dateValue;
-				time.textContent = value;
-				description.append(time);
-			} else {
-				description.textContent = value;
-			}
-			wrapper.append(term, description);
-			return wrapper;
+		function createRunnerStat(label, value, populated = false) {
+			const stat = document.createElement("span");
+			stat.className = "runner-stat";
+			if (populated) stat.dataset.populated = "true";
+			const statLabel = document.createElement("span");
+			statLabel.className = "runner-stat-label";
+			statLabel.textContent = label;
+			const statValue = document.createElement("span");
+			statValue.className = "runner-stat-value";
+			statValue.textContent = value;
+			stat.append(statLabel, statValue);
+			return stat;
 		}
 
-		function createSessionTable(runner) {
-			const table = document.createElement("table");
-			table.className = "session-table";
-			const caption = document.createElement("caption");
-			caption.className = "visually-hidden";
-			caption.textContent = `Sessions on ${runner.id}`;
-			const head = document.createElement("thead");
-			const headRow = document.createElement("tr");
-			for (const label of ["Index", "Session", "State", "Meaning"]) {
-				const cell = document.createElement("th");
-				cell.scope = "col";
-				cell.textContent = label;
-				headRow.append(cell);
-			}
-			head.append(headRow);
-			const body = document.createElement("tbody");
+		function createRunnerSessions(runner, runnerIndex) {
+			const sessions = document.createElement("section");
+			sessions.className = "runner-sessions";
+			sessions.id = `runner-sessions-${runnerIndex}`;
+			sessions.dataset.runnerId = runner.id;
+			sessions.tabIndex = 0;
+			sessions.setAttribute("aria-label", `Sessions on ${runner.id}. Activate to collapse`);
 
+			const runnerSummary = document.createElement("div");
+			runnerSummary.className = "runner-sessions-runner";
+			const runnerSummaryIndex = document.createElement("span");
+			runnerSummaryIndex.className = "runner-sessions-runner-index";
+			runnerSummaryIndex.textContent = `R${padCount(runnerIndex + 1)}`;
+			const runnerSummaryName = document.createElement("strong");
+			runnerSummaryName.className = "runner-sessions-runner-name";
+			runnerSummaryName.textContent = runner.id;
+			runnerSummaryName.title = runner.id;
+			runnerSummary.append(runnerSummaryIndex, runnerSummaryName);
+			sessions.append(runnerSummary);
+
+			const header = document.createElement("div");
+			header.className = "runner-sessions-header";
+			const title = document.createElement("span");
+			title.textContent = "Sessions";
+			const count = document.createElement("span");
+			count.textContent = padCount(runner.sessions.length);
+			header.append(title, count);
+			sessions.append(header);
+
+			if (!runner.sessions.length) {
+				const empty = document.createElement("p");
+				empty.className = "runner-session-empty";
+				empty.textContent = "No sessions · control connection ready";
+				sessions.append(empty);
+				return sessions;
+			}
+
+			const list = document.createElement("ol");
+			list.className = "runner-session-list";
 			runner.sessions.forEach((session, sessionIndex) => {
-				const row = document.createElement("tr");
-				const values = [
-					[`S${padCount(sessionIndex + 1)}`, "Index"],
-					[session.name, "Session"],
-					[session.state, "State"],
-					[session.state === "attached" ? "Client attached" : session.state === "opening" ? "Opening session" : "Ready for a client", "Meaning"],
-				];
-				values.forEach(([value, label], cellIndex) => {
-					const cell = document.createElement(cellIndex === 1 ? "th" : "td");
-					cell.dataset.label = label;
-					if (cellIndex === 1) {
-						cell.scope = "row";
-						cell.className = "session-name";
-					}
-					if (cellIndex === 2) {
-						const badge = document.createElement("span");
-						badge.className = "state";
-						badge.dataset.state = session.state;
-						badge.textContent = value;
-						cell.append(badge);
-					} else {
-						cell.textContent = value;
-					}
-					row.append(cell);
-				});
-				body.append(row);
+				const row = document.createElement("li");
+				row.className = "runner-session";
+				const index = document.createElement("span");
+				index.className = "runner-session-index";
+				index.textContent = `S${padCount(sessionIndex + 1)}`;
+				const name = document.createElement("span");
+				name.className = "session-name";
+				name.textContent = session.name;
+				name.title = session.name;
+				const state = document.createElement("span");
+				state.className = "state";
+				state.dataset.state = session.state;
+				state.textContent = session.state;
+				row.append(index, name, state);
+				list.append(row);
 			});
-			table.append(caption, head, body);
-			return table;
+			sessions.append(list);
+			return sessions;
+		}
+
+		function cancelSessionsCollapse() {
+			collapsingSessionsAnimation?.cancel();
+			collapsingSessionsAnimation = null;
+			collapsingRunnerId = null;
+		}
+
+		function collapseRunnerSessions(sessions) {
+			if (collapsingRunnerId) return;
+			const runnerId = sessions.dataset.runnerId;
+			const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+			const styles = getComputedStyle(sessions);
+			collapsingRunnerId = runnerId;
+			const animation = sessions.animate(
+				reducedMotion
+					? [{ opacity: styles.opacity }, { opacity: 0 }]
+					: [{ transform: styles.transform }, { transform: "translateY(100%)" }],
+				{
+					duration: reducedMotion ? 160 : 220,
+					easing: reducedMotion ? "ease" : "cubic-bezier(0.23, 1, 0.32, 1)",
+					fill: "forwards",
+				},
+			);
+			collapsingSessionsAnimation = animation;
+			animation.finished.then(() => {
+				if (collapsingSessionsAnimation !== animation) return;
+				collapsingSessionsAnimation = null;
+				collapsingRunnerId = null;
+				if (selectedRunnerId === runnerId) selectedRunnerId = null;
+				renderDirectory(latestData);
+			}).catch(() => {});
+		}
+
+		function createRunnerCard(runner, runnerIndex, isSelected) {
+			const attached = runner.sessions.filter((session) => session.state === "attached").length;
+			const opening = runner.sessions.filter((session) => session.state === "opening").length;
+			const sessionLabel = `${runner.sessions.length} session${runner.sessions.length === 1 ? "" : "s"}`;
+			const canExpand = runner.sessions.length > 0;
+			const card = document.createElement("article");
+			card.className = "runner-card";
+			card.dataset.expanded = String(isSelected);
+			card.dataset.entering = String(isSelected && expandingRunnerId === runner.id);
+
+			const block = document.createElement("button");
+			block.className = "runner-block";
+			block.type = "button";
+			block.tabIndex = isSelected ? -1 : 0;
+			block.dataset.runnerId = runner.id;
+			block.setAttribute("aria-expanded", String(canExpand && isSelected));
+			if (canExpand && isSelected) block.setAttribute("aria-controls", `runner-sessions-${runnerIndex}`);
+			block.setAttribute("aria-label", canExpand
+				? isSelected
+					? `Selected runner ${runner.id}, showing ${sessionLabel}`
+					: `Select runner ${runner.id} to show ${sessionLabel}`
+				: `Runner ${runner.id} has no sessions`);
+
+			const top = document.createElement("span");
+			top.className = "runner-block-top";
+			const index = document.createElement("span");
+			index.className = "runner-index";
+			const indexLabel = document.createElement("span");
+			indexLabel.className = "eyebrow";
+			indexLabel.textContent = "Runner";
+			const indexValue = document.createElement("strong");
+			indexValue.textContent = `R${padCount(runnerIndex + 1)}`;
+			index.append(indexLabel, indexValue);
+
+			const presence = document.createElement("span");
+			presence.className = "runner-presence";
+			const online = document.createElement("span");
+			online.className = "runner-online";
+			online.textContent = "Online";
+			const connected = document.createElement("time");
+			connected.className = "runner-connected";
+			connected.dateTime = runner.connectedAt;
+			connected.textContent = `Connected ${dateTime(runner.connectedAt)}`;
+			connected.title = dateTime(runner.connectedAt);
+			presence.append(online, connected);
+			top.append(index, presence);
+
+			const identity = document.createElement("span");
+			identity.className = "runner-identity";
+			const title = document.createElement("span");
+			title.className = "runner-name";
+			title.textContent = runner.id;
+			title.title = runner.id;
+			const action = document.createElement("span");
+			action.className = "runner-action";
+			action.textContent = canExpand
+				? isSelected ? `${sessionLabel} shown` : `View ${sessionLabel} ↓`
+				: "No sessions";
+			identity.append(title, action);
+
+			const sessionsStat = createRunnerStat(
+				"Sessions",
+				String(runner.sessions.length),
+				canExpand,
+			);
+			const stats = document.createElement("span");
+			stats.className = "runner-stats";
+			stats.append(
+				createRunnerStat("Uptime", elapsed(runner.connectedAt)),
+				sessionsStat,
+				createRunnerStat("Attached", String(attached)),
+				createRunnerStat("Opening", String(opening)),
+			);
+			block.append(top, identity, stats);
+			let emptySessionsAnimation;
+			block.addEventListener("click", () => {
+				if (!canExpand) {
+					emptySessionsAnimation?.cancel();
+					emptySessionsAnimation = sessionsStat.animate(
+						[
+							{ backgroundColor: "var(--signal)", offset: 0 },
+							{ backgroundColor: "var(--signal)", offset: 0.35 },
+							{ backgroundColor: "transparent", offset: 1 },
+						],
+						{
+							duration: 160,
+							easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+							fill: "none",
+						},
+					);
+					return;
+				}
+				if (selectedRunnerId === runner.id) {
+					collapseRunnerSessions(card.querySelector(".runner-sessions"));
+					return;
+				}
+				cancelSessionsCollapse();
+				selectedRunnerId = runner.id;
+				expandingRunnerId = runner.id;
+				renderDirectory(latestData);
+				expandingRunnerId = null;
+			});
+			card.append(block);
+			if (isSelected) {
+				const sessions = createRunnerSessions(runner, runnerIndex);
+				const collapseSessions = () => collapseRunnerSessions(sessions);
+				sessions.addEventListener("click", collapseSessions);
+				sessions.addEventListener("keydown", (event) => {
+					if (event.key !== "Enter" && event.key !== " ") return;
+					event.preventDefault();
+					collapseSessions();
+				});
+				card.append(sessions);
+			}
+			return card;
 		}
 
 		function renderDirectory(data) {
+			const focusedRunnerId = document.activeElement?.matches(".runner-block, .runner-sessions")
+				? document.activeElement.dataset.runnerId
+				: null;
 			container.replaceChildren();
 			const runners = visibleRunners(data.runners);
 			const hasFilter = Boolean(filterInput.value.trim());
@@ -1114,6 +1403,7 @@
 				: `${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} shown.`;
 
 			if (!runners.length) {
+				if (!data.runners.length) selectedRunnerId = null;
 				if (hasFilter && data.runners.length) {
 					renderEmpty("No matches", "Try a different runner or session name.", "R–Ø");
 				} else {
@@ -1122,53 +1412,24 @@
 				return;
 			}
 
-			runners.forEach((runner, runnerIndex) => {
-				const card = document.createElement("article");
-				card.className = "runner";
-				card.setAttribute("aria-labelledby", `runner-${runnerIndex}`);
-
-				const heading = document.createElement("header");
-				heading.className = "runner-header";
-				const index = document.createElement("div");
-				index.className = "runner-index";
-				const indexLabel = document.createElement("span");
-				indexLabel.className = "eyebrow";
-				indexLabel.textContent = "Runner";
-				const indexValue = document.createElement("strong");
-				indexValue.textContent = `R${padCount(runnerIndex + 1)}`;
-				index.append(indexLabel, indexValue);
-
-				const identity = document.createElement("div");
-				identity.className = "runner-identity";
-				const online = document.createElement("span");
-				online.className = "runner-online";
-				online.textContent = "Online";
-				const title = document.createElement("h3");
-				title.className = "runner-name";
-				title.id = `runner-${runnerIndex}`;
-				title.textContent = runner.id;
-				identity.append(online, title);
-
-				const metadata = document.createElement("dl");
-				metadata.className = "runner-meta";
-				metadata.append(
-					createMeta("Connected", dateTime(runner.connectedAt), runner.connectedAt),
-					createMeta("Uptime", elapsed(runner.connectedAt)),
-					createMeta("Sessions", String(runner.sessions.length)),
-				);
-				heading.append(index, identity, metadata);
-				card.append(heading);
-
-				if (runner.sessions.length) {
-					card.append(createSessionTable(runner));
-				} else {
-					const empty = document.createElement("p");
-					empty.className = "runner-empty";
-					empty.textContent = "No sessions on this runner. The control connection is ready.";
-					card.append(empty);
-				}
-				container.append(card);
+			const selectedRunner = runners.find((runner) =>
+				runner.id === selectedRunnerId && runner.sessions.length > 0
+			) ?? null;
+			selectedRunnerId = selectedRunner?.id ?? null;
+			const grid = document.createElement("div");
+			grid.className = "runner-grid";
+			grid.setAttribute("aria-label", "Online runners");
+			runners.forEach((runner) => {
+				const runnerIndex = data.runners.indexOf(runner);
+				grid.append(createRunnerCard(runner, runnerIndex, runner.id === selectedRunnerId));
 			});
+			container.append(grid);
+			if (focusedRunnerId) {
+				const focusTargets = [...grid.querySelectorAll(".runner-sessions, .runner-block")]
+					.filter((element) => element.dataset.runnerId === focusedRunnerId);
+				(focusTargets.find((element) => element.classList.contains("runner-sessions")) ?? focusTargets[0])
+					?.focus({ preventScroll: true });
+			}
 		}
 
 		function render(data) {
