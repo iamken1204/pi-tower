@@ -58,7 +58,7 @@ docker compose up -d
 
 In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower:9000`; the tower URL everywhere else is then `wss://<that-hostname>`.
 
-Open `https://<that-hostname>/ui/` and enter the shared token to view live runner and session state. The tower exchanges it for a signed, HTTP-only session cookie valid for 30 days; the raw token is not retained by the page.
+Open `https://<that-hostname>/` and enter the shared token to view live runner and session state. The tower exchanges it for a signed, HTTP-only session cookie valid for 30 days; the raw token is not retained by the page.
 
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
@@ -116,8 +116,9 @@ The public UI shell and health response expose no runner state. CLI requests and
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /` | health, returns `pi-tower` |
-| `GET /ui/` | public HTML state viewer shell |
+| `GET /healthz` | health, returns `pi-tower` |
+| `GET /` | public HTML state viewer shell |
+| `GET /ui/` | redirects to `/` (old bookmarks) |
 | `POST /api/session` | validate a UI token, set the signed session cookie, and redirect |
 | `GET /api/state` | protected JSON runner and session state |
 | `GET /api/events` | protected SSE stream of runner and session state |

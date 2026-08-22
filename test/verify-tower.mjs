@@ -50,8 +50,14 @@ const readSse = async (reader) => {
 };
 
 // health
-assert.equal(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text()), "pi-tower");
+assert.equal(await fetch(`http://127.0.0.1:${port}/healthz`).then((r) => r.text()), "pi-tower");
 console.log("ok health");
+
+// legacy UI path
+const legacyUi = await fetch(`http://127.0.0.1:${port}/ui/?auth=failed`, { redirect: "manual" });
+assert.equal(legacyUi.status, 301);
+assert.equal(legacyUi.headers.get("location"), "/?auth=failed");
+console.log("ok legacy /ui/ redirects to /");
 
 // auth reject on attach and /runners
 assert.equal((await closed(attach("x", "s", "wrong"))).code, 4001);
@@ -66,7 +72,7 @@ assert.equal((await fetch(`http://127.0.0.1:${port}/api/state`)).status, 401);
 assert.equal((await fetch(`http://127.0.0.1:${port}/api/events`)).status, 401);
 console.log("ok missing auth header 401");
 
-const uiResponse = await fetch(`http://127.0.0.1:${port}/ui/`);
+const uiResponse = await fetch(`http://127.0.0.1:${port}/`);
 assert.equal(uiResponse.status, 200);
 assert.match(uiResponse.headers.get("content-type"), /^text\/html;\s*charset=utf-8$/i);
 const uiHtml = await uiResponse.text();
@@ -82,7 +88,7 @@ const loginResponse = await fetch(`http://127.0.0.1:${port}/api/session`, {
 	redirect: "manual",
 });
 assert.equal(loginResponse.status, 303);
-assert.equal(loginResponse.headers.get("location"), "/ui/");
+assert.equal(loginResponse.headers.get("location"), "/");
 const setCookie = loginResponse.headers.get("set-cookie");
 assert.match(setCookie, /^pi_tower_ui_session=[^;]+; Path=\/api; HttpOnly; SameSite=Strict; Max-Age=2592000$/);
 const sessionCookie = setCookie.split(";", 1)[0];
@@ -107,7 +113,7 @@ const failedLogin = await fetch(`http://127.0.0.1:${port}/api/session`, {
 	redirect: "manual",
 });
 assert.equal(failedLogin.status, 303);
-assert.equal(failedLogin.headers.get("location"), "/ui/?auth=failed");
+assert.equal(failedLogin.headers.get("location"), "/?auth=failed");
 assert.match(failedLogin.headers.get("set-cookie"), /Max-Age=0/);
 console.log("ok failed UI login redirects and clears prior session");
 

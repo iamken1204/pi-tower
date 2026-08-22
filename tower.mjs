@@ -117,8 +117,13 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
-		if (url.pathname === "/") {
+		if (url.pathname === "/healthz") {
 			res.end("pi-tower");
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/") {
+			res.setHeader("content-type", "text/html; charset=utf-8");
+			res.end(UI_HTML);
 			return;
 		}
 		if (url.pathname === "/runners") {
@@ -147,11 +152,11 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 				const submittedToken = new URLSearchParams(body).get("token");
 				if (submittedToken === token) {
 					setUiSessionCookie(req, res, issueUiSession());
-					res.writeHead(303, { location: "/ui/" }).end();
+					res.writeHead(303, { location: "/" }).end();
 					return;
 				}
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
-				res.writeHead(303, { location: "/ui/?auth=failed" }).end();
+				res.writeHead(303, { location: "/?auth=failed" }).end();
 			});
 			return;
 		}
@@ -197,9 +202,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			req.on("close", () => uiStreams.delete(res));
 			return;
 		}
-		if (req.method === "GET" && url.pathname === "/ui/") {
-			res.setHeader("content-type", "text/html; charset=utf-8");
-			res.end(UI_HTML);
+		if (url.pathname === "/ui/") {
+			res.writeHead(301, { location: `/${url.search}` }).end();
 			return;
 		}
 		res.writeHead(404).end();
