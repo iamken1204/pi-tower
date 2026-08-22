@@ -6,6 +6,7 @@ services:
     build: .
     environment:
       PI_TOWER_TOKEN: ${PI_TOWER_TOKEN:?set PI_TOWER_TOKEN in .env}
+      PI_TOWER_IDLE_TTL: ${PI_TOWER_IDLE_TTL:-30m}
     restart: unless-stopped
 
   cloudflared:

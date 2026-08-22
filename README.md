@@ -100,7 +100,7 @@ stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; prog
 
 ## Sessions
 
-Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. Idle session processes stay alive until the runner stops.
+Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. A session nobody is attached to is closed after 30 minutes without output, which ends its `pi` process and discards its conversation. Tune that with `--idle-ttl 2h` / `PI_TOWER_IDLE_TTL` (`s`, `m`, or `h`; `0` disables), or close a session by hand from the web UI.
 
 pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
 
@@ -134,7 +134,7 @@ The public UI shell and health response expose no runner state. CLI requests and
 | 4006 | session disconnected while attached |
 | 4007 | runner failed to open the session (15s timeout or runner offline) |
 
-Detaching a client leaves its session pipe idle on the tower, so a later attach with the same name resumes the conversation without a new `open`.
+Detaching a client leaves its session pipe idle on the tower, so a later attach with the same name resumes the conversation without a new `open`. Once a detached session has been quiet for the idle TTL, or on `DELETE /api/session?runner=<id>&session=<name>`, the tower sends `{"type":"close","session":"<name>"}` on the control socket and the runner kills that `pi` process.
 
 ## Security
 

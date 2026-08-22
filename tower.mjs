@@ -17,6 +17,7 @@ function parseArgs(argv) {
 		port: 9000,
 		token: process.env.PI_TOWER_TOKEN,
 		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
+		idleTtl: process.env.PI_TOWER_IDLE_TTL ?? "30m",
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--port") opts.port = Number(argv[++i]);
@@ -26,11 +27,18 @@ function parseArgs(argv) {
 		} else if (argv[i] === "--token-file") {
 			opts.tokenFile = argv[++i];
 			opts.token = undefined;
-		} else {
-			console.error(`unknown option ${argv[i]}\nusage: pi-tower [--port 9000] [--token t | --token-file path]`);
+		} else if (argv[i] === "--idle-ttl") opts.idleTtl = argv[++i];
+		else {
+			console.error(`unknown option ${argv[i]}\nusage: pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]`);
 			process.exit(1);
 		}
 	}
+	const ttl = /^(\d+)(s|m|h)?$/.exec(opts.idleTtl);
+	if (!ttl) {
+		console.error(`invalid --idle-ttl "${opts.idleTtl}": use a number with s, m, or h (0 disables)`);
+		process.exit(1);
+	}
+	opts.idleTtlMs = Number(ttl[1]) * { s: 1000, m: 60_000, h: 3_600_000 }[ttl[2] ?? "m"];
 	if (opts.tokenFile) {
 		try {
 			opts.token = readTokenFile(opts.tokenFile);
@@ -46,8 +54,8 @@ function parseArgs(argv) {
 	return opts;
 }
 
-export function createTower({ token, openTimeoutMs = 15000 }) {
-	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client }> }
+export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000 }) {
+	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
 	const pending = new Map();
@@ -147,6 +155,21 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			});
 			return;
 		}
+		if (req.method === "DELETE" && url.pathname === "/api/session") {
+			if (!uiAuthorized(req)) {
+				res.writeHead(401).end();
+				return;
+			}
+			const id = url.searchParams.get("runner");
+			const name = url.searchParams.get("session");
+			const live = id && name && runners.get(id)?.sessions.get(name);
+			if (!live) {
+				res.writeHead(404).end();
+				return;
+			}
+			res.writeHead(closeSession(id, name) ? 204 : 409).end();
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/api/state") {
 			if (!uiAuthorized(req)) {
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
@@ -227,6 +250,25 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		broadcastSnapshot();
 	}
 
+	// A detached session that stays quiet for idleTtlMs is closed on the runner, freeing its pi process.
+	function armIdle(id, name, session) {
+		clearTimeout(session.idle);
+		if (!idleTtlMs) return;
+		session.idle = setTimeout(() => {
+			const runner = runners.get(id);
+			if (runner?.sessions.get(name) !== session || session.client) return;
+			closeSession(id, name);
+		}, idleTtlMs);
+	}
+
+	// Asks the runner to kill the session's pi process; the pipe closing then drops it from the map.
+	function closeSession(id, name) {
+		const runner = runners.get(id);
+		if (!runner?.sessions.has(name) || runner.ws.readyState !== 1) return false;
+		runner.ws.send(JSON.stringify({ type: "close", session: name }));
+		return true;
+	}
+
 	function handleControl(ws, params) {
 		const id = params.get("id");
 		if (!id || !NAME_RE.test(id)) {
@@ -246,6 +288,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			if (runners.get(id)?.ws !== ws) return; // replaced
 			runners.delete(id);
 			for (const s of runner.sessions.values()) {
+				clearTimeout(s.idle);
 				s.client?.close(4006, "session disconnected");
 				s.ws.terminate();
 			}
@@ -268,8 +311,12 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		const prev = runner.sessions.get(name);
 		const p = pending.get(key);
 		const session = { ws, client: prev?.client ?? p?.client ?? null };
-		if (prev) prev.ws.terminate(); // new pipe wins, attached client kept
+		if (prev) {
+			clearTimeout(prev.idle);
+			prev.ws.terminate(); // new pipe wins, attached client kept
+		}
 		runner.sessions.set(name, session);
+		if (!session.client) armIdle(id, name, session);
 		if (p) {
 			pending.delete(key);
 			clearTimeout(p.timer);
@@ -278,11 +325,13 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 		broadcastSnapshot();
 		ws.on("message", (data) => {
 			if (runner.sessions.get(name)?.ws !== ws) return; // replaced
-			session.client?.send(data.toString());
+			if (session.client) session.client.send(data.toString());
+			else armIdle(id, name, session); // still working after detach; count idle from its last output
 		});
 		ws.on("close", () => {
 			const s = runners.get(id)?.sessions.get(name);
 			if (s?.ws !== ws) return; // replaced
+			clearTimeout(s.idle);
 			s.client?.close(4006, "session disconnected");
 			runners.get(id).sessions.delete(name);
 			broadcastSnapshot();
@@ -308,8 +357,10 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			ws.close(4005, "busy");
 			return;
 		}
-		if (live) live.client = ws;
-		else if (runner.ws.readyState !== 1) {
+		if (live) {
+			clearTimeout(live.idle);
+			live.client = ws;
+		} else if (runner.ws.readyState !== 1) {
 			ws.close(4007, "runner failed to open session");
 			return;
 		} else {
@@ -341,6 +392,7 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 			const s = runners.get(id)?.sessions.get(name);
 			if (s?.client === ws) {
 				s.client = null; // pipe stays idle, session context preserved for reattach
+				armIdle(id, name, s);
 				broadcastSnapshot();
 			}
 		});
@@ -350,8 +402,8 @@ export function createTower({ token, openTimeoutMs = 15000 }) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-	const { port, token } = parseArgs(process.argv.slice(2));
-	createTower({ token }).listen(port, () => console.log(`pi-tower listening on :${port}`));
+	const { port, token, idleTtlMs } = parseArgs(process.argv.slice(2));
+	createTower({ token, idleTtlMs }).listen(port, () => console.log(`pi-tower listening on :${port}`));
 	// As container PID 1, node has no default signal dispositions, so docker stop would otherwise hang 10s to SIGKILL.
 	for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(0));
 }

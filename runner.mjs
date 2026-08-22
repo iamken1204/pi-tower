@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// pi-runner: registers with a pi-tower and runs one `pi --mode rpc` child per opened session.
+// pi-runner: registers with a pi-tower and runs one `pi --mode rpc` child per opened session, killed when the tower closes it.
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { readTokenFile } from "./lib.mjs";
@@ -115,7 +115,9 @@ function connect() {
 		} catch {
 			return;
 		}
-		if (msg.type === "open" && typeof msg.session === "string" && NAME_RE.test(msg.session)) ensureSession(msg.session);
+		if (typeof msg.session !== "string" || !NAME_RE.test(msg.session)) return;
+		if (msg.type === "open") ensureSession(msg.session);
+		else if (msg.type === "close") children.get(msg.session)?.child.kill();
 	};
 	control.onclose = (ev) => {
 		console.error(`control disconnected (${ev.code}); retrying in 3s`);

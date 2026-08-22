@@ -746,10 +746,18 @@
 		.runner-session {
 			display: grid;
 			height: 2.35rem;
-			grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+			grid-template-columns: 2.25rem minmax(0, 1fr) auto auto;
 			gap: .45rem;
 			align-items: center;
 			padding: .4rem .55rem;
+		}
+
+		.session-close {
+			padding: .1rem .4rem;
+			font-size: 9px;
+			font-weight: 800;
+			letter-spacing: .04em;
+			text-transform: uppercase;
 		}
 
 		.runner-session + .runner-session { border-top: 1px solid var(--line); }
@@ -1236,7 +1244,22 @@
 				state.className = "state";
 				state.dataset.state = session.state;
 				state.textContent = session.state;
-				row.append(index, name, state);
+				const close = document.createElement("button");
+				close.className = "secondary-button session-close";
+				close.type = "button";
+				close.textContent = "Close";
+				close.title = `Stop the pi process for ${session.name}`;
+				close.addEventListener("click", async (event) => {
+					event.stopPropagation();
+					close.disabled = true;
+					const query = `runner=${encodeURIComponent(runner.id)}&session=${encodeURIComponent(session.name)}`;
+					const response = await fetch(`/api/session?${query}`, { method: "DELETE", credentials: "same-origin" });
+					if (!response.ok) {
+						close.disabled = false;
+						setStatus(`Could not close ${session.name} (${response.status}).`, "error");
+					}
+				});
+				row.append(index, name, state, close);
 				list.append(row);
 			});
 			sessions.append(list);

@@ -31,9 +31,14 @@ function dialPipe(port, token, id, session, pipes) {
 export function connectFakeRunner(port, token, id, { ignoreOpen = false } = {}) {
 	const ws = new WebSocket(`ws://127.0.0.1:${port}/runner?id=${id}`, { headers: { authorization: `Bearer ${token}` } });
 	const opens = [];
+	const closes = [];
 	const pipes = new Map(); // session name -> pipe ws
 	ws.onmessage = (ev) => {
 		const msg = JSON.parse(ev.data);
+		if (msg.type === "close") {
+			closes.push(msg.session);
+			pipes.get(msg.session)?.close(); // like a killed pi child dropping its pipe
+		}
 		if (msg.type !== "open") return;
 		opens.push(msg.session);
 		if (!ignoreOpen) dialPipe(port, token, id, msg.session, pipes);
@@ -43,6 +48,7 @@ export function connectFakeRunner(port, token, id, { ignoreOpen = false } = {}) 
 			resolve({
 				ws,
 				opens,
+				closes,
 				pipes,
 				close() {
 					ws.close();

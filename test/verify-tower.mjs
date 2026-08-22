@@ -4,7 +4,7 @@ import { createTower } from "../tower.mjs";
 import { connectFakeRunner } from "./fake-runner.mjs";
 
 const TOKEN = "t0k";
-const server = createTower({ token: TOKEN, openTimeoutMs: 400 });
+const server = createTower({ token: TOKEN, openTimeoutMs: 400, idleTtlMs: 2000 });
 server.listen(0);
 await once(server, "listening");
 const port = server.address().port;
@@ -187,6 +187,37 @@ assert.deepEqual((await apiState()).runners[0].sessions, [{ name: "x", state: "o
 assert.equal((await pendingClosed).code, 4007);
 fake2.close();
 console.log("ok open timeout 4007");
+
+// detached session idle for idleTtlMs -> tower asks the runner to close it; attaching cancels the timer
+const fake3 = await connectFakeRunner(port, TOKEN, "r3");
+const idle1 = await opened(attach("r3", "gc"));
+await settle();
+idle1.close();
+await settle(500);
+assert.deepEqual(fake3.closes, []);
+const idle2 = await opened(attach("r3", "gc")); // reattach before expiry resets the clock
+await settle(1800);
+assert.deepEqual(fake3.closes, []);
+idle2.close();
+await settle(2500);
+assert.deepEqual(fake3.closes, ["gc"]);
+assert.deepEqual(await sessions(), [["r3", 0]]);
+console.log("ok idle session closed after ttl");
+
+// DELETE /api/session closes by hand: attached client gets 4006 once the pipe drops
+const del = (q, headers = { authorization: `Bearer ${TOKEN}` }) =>
+	fetch(`http://127.0.0.1:${port}/api/session?${q}`, { method: "DELETE", headers }).then((r) => r.status);
+const manual = await opened(attach("r3", "manual"));
+await settle();
+assert.equal(await del("runner=r3&session=manual", { authorization: "Bearer wrong" }), 401);
+assert.equal(await del("runner=r3&session=nope"), 404);
+const manualClosed = closed(manual);
+assert.equal(await del("runner=r3&session=manual"), 204);
+assert.equal((await manualClosed).code, 4006);
+assert.deepEqual(fake3.closes, ["gc", "manual"]);
+assert.deepEqual(await sessions(), [["r3", 0]]);
+fake3.close();
+console.log("ok DELETE /api/session closes session");
 
 server.close();
 console.log("verify-tower: all green");
