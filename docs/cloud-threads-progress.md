@@ -1,6 +1,6 @@
 # Cloud Threads 實作與驗證紀錄
 
-第 1～3 階段的主要路徑已實作，第 4 階段仍待完整容器與驗收矩陣收尾；**尚不宣稱 v1 完成**。依據 [v1 規格](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。使用者已授權接續各階段及本機 commit，未授權 push、部署或發布。
+第 1～3 階段的主要路徑已實作，第 4 階段容器驗證已通過，仍待其餘驗收矩陣收尾；**尚不宣稱 v1 完成**。依據 [v1 規格](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。使用者已授權接續各階段及本機 commit，未授權 push、部署或發布。
 
 ## 持久化與還原契約
 
@@ -54,9 +54,16 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 桌機與手機截圖均已用 view_media 檢查。修正過 composer 擋住 dialog 按鈕的問題，並實際點擊確認；工具結果改成可展開文字，保留原始快照內容。證據：`assets/cloud-threads-desktop.png`、`assets/cloud-threads-mobile-dialog.png`、`assets/cloud-threads-mobile-title.png`。
 
+## 容器驗證
+
+使用者允許啟動 OrbStack 後，`node test/verify-docker.mjs` 通過。測試建置實際 Dockerfile，使用 Node 22.22.0 Alpine、UID 1000 與獨立 named volumes；主機端為 pi 0.85.1 公開 SDK／RPC 加 faux provider，沒有付費模型呼叫。
+
+真實 pi bash 在隔離 workspace 寫檔並同步後，正常停止 Tower，封存整個 `/data`，還原到全新 volume。以非 root 驗證 SQLite integrity、snapshot hash／leaf、標題與 settled 收據一致；重建並替換容器後，原 runner 重新連線，同 ID 命令保留 settled、新命令讀回同 cwd 的檔案，舊 entries 完整保留。這補上 A24 的產品 image 與 volume 還原證據，不代表 Cloudflare Tunnel 或遠端部署已驗證。
+
+測試自行清除專用容器、image、volumes 與隔離目錄，不自動啟動 Docker engine，也不加入預設回歸套件。OrbStack 與隨其啟動的三個既有 VictoriaLogs 容器保持運作，沒有修改其設定或資料。
+
 ## 尚未完成的驗收
 
-- A24 的完整 Docker image 重建、容器 volume 備份還原尚未執行。第 0 階段 Alpine driver probe 已通過，但不能替代產品 image。OrbStack 處於停止狀態；之前啟動會連帶啟動三個既有 VictoriaLogs 容器，未經確認不再啟動。
 - A11 已涵蓋上述 7 個 runner 命令邊界；尚未逐一注入 Tower 每個 SQL／網路回覆邊界，以及兩份備份同時退回後的延遲 abort／dialog 訊息。
 - A18／A26 已涵蓋可設定大小／配額邊界、SQLite FULL、鎖定及 fake slow viewer；尚未跑預設 64 MiB／1 GiB 規模、真實慢速網路及 runner fsync 的 ENOSPC／EIO 注入。
 - A22 的 metadata／搜尋／封存已測；大量清單多頁翻動與同時更新的完整組合尚未測。
