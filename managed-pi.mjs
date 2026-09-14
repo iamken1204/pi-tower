@@ -1,8 +1,13 @@
 // Process-owning public pi RPC host. Only the runner can feed this child's stdin.
 import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
+import { holdWriterLock } from "./managed-lock.mjs";
 
 const [packageDir, recordFile] = process.argv.slice(2);
+const writerGuard = holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
+// Retain the lock through every exit callback; only OS process teardown releases it.
+process.on("exit", () => { void writerGuard; });
 const record = readJson(recordFile);
 const saved = loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, process.cwd());
 const api = await import(pathToFileURL(`${packageDir}/dist/index.js`));
@@ -26,13 +31,23 @@ const runtime = await api.createAgentSessionRuntime(async (options) => {
 	return { ...await api.createAgentSessionFromServices({ ...options, services }), services, diagnostics: services.diagnostics };
 }, { cwd: process.cwd(), agentDir: api.getAgentDir(), sessionManager: sm });
 
+let checkpointTimer;
 runtime.session.subscribe((event) => {
+	if (event.type === "message_end" && !checkpointTimer) {
+		checkpointTimer = setTimeout(() => {
+			checkpointTimer = null;
+			try { save(); process.send?.({ type: "checkpoint", settled: false }); }
+			catch { process.send?.({ type: "checkpoint_error" }); process.exit(1); }
+		}, 50);
+	}
 	if (event.type === "agent_settled") {
-		try { save(); process.send?.({ type: "checkpoint" }); }
+		clearTimeout(checkpointTimer); checkpointTimer = null;
+		try { save(); process.send?.({ type: "checkpoint", settled: true }); }
 		catch { process.send?.({ type: "checkpoint_error" }); process.exit(1); }
 	}
 });
 runtime.setBeforeSessionInvalidate(() => {
+	clearTimeout(checkpointTimer);
 	save();
 	process.send?.({ type: "saved_shutdown" });
 });

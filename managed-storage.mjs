@@ -48,13 +48,21 @@ export function checkpoint(header, entries, leafId) {
 	return { ...body, hash: createHash("sha256").update(JSON.stringify(body)).digest("hex") };
 }
 
-export function loadCheckpoint(file, sessionFile, sessionId, cwd) {
+export function loadCheckpoint(file, sessionFile, sessionId, cwd, recoverAppend = false) {
 	const saved = readJson(file);
 	const verified = checkpoint(saved.header, saved.entries, saved.leafId);
 	if (saved.hash !== verified.hash || saved.header.id !== sessionId || saved.header.cwd !== cwd) throw new Error("checkpoint_identity_or_hash_mismatch");
 	const text = readFileSync(sessionFile, "utf8"); // Missing local files require explicit cloud recovery, never recreation here.
 	if (!text.endsWith("\n")) throw new Error("incomplete_session_file");
 	const records = text.slice(0, -1).split("\n").map((line) => JSON.parse(line));
-	if (JSON.stringify(records) !== JSON.stringify([saved.header, ...saved.entries])) throw new Error("session_checkpoint_mismatch");
+	if (JSON.stringify(records) !== JSON.stringify([saved.header, ...saved.entries])) {
+		const prefix = [saved.header, ...saved.entries];
+		if (!recoverAppend || records.length <= prefix.length || !prefix.every((entry, index) => JSON.stringify(entry) === JSON.stringify(records[index]))) throw new Error("session_checkpoint_mismatch");
+		// Only after proving the old writer exited: retain every complete appended entry.
+		// With no later append the saved independent leaf remains authoritative.
+		const recovered = checkpoint(records[0], records.slice(1), records.at(-1).id);
+		durableWrite(file, recovered);
+		return recovered;
+	}
 	return verified;
 }

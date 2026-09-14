@@ -23,7 +23,7 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
-			console.log("pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]\n--data-dir <path> enables the managed catalog (or PI_TOWER_DATA_DIR).");
+			console.log("pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]\n--data-dir <path> enables Cloud Threads at /threads (or PI_TOWER_DATA_DIR).\nManaged limits (environment, bytes):\nPI_MANAGED_TEXT_BYTES=262144 (set on runner too)\nPI_TOWER_MANAGED_FRAME_BYTES=524288\nPI_TOWER_MAX_SNAPSHOT_BYTES=67108864\nPI_TOWER_MAX_SNAPSHOT_TOTAL_BYTES=1073741824\nPI_TOWER_MIN_FREE_BYTES=268435456\nPI_TOWER_VIEWER_BUFFER_BYTES=1048576\nPI_TOWER_MAX_UPLOADS=2 (concurrent uploads)\nGET /api/managed/usage reports BLOB/database/WAL/free bytes.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--port") opts.port = Number(argv[++i]);
@@ -61,8 +61,8 @@ function parseArgs(argv) {
 	return opts;
 }
 
-export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir }) {
-	const managed = dataDir ? createManagedTower(dataDir) : null;
+export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions }) {
+	const managed = dataDir ? createManagedTower(dataDir, managedOptions) : null;
 	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
@@ -93,6 +93,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	const uiAuthorized = (req) => bearerAuthorized(req) || uiSessionAuthorized(req);
 	const secureRequest = (req) =>
 		req.socket.encrypted === true || req.headers["x-forwarded-proto"]?.split(",", 1)[0].trim() === "https";
+	const sameOrigin = (req) => req.headers.origin === `${secureRequest(req) ? "https" : "http"}://${req.headers.host}`;
+	const csrfAuthorized = (req) => bearerAuthorized(req) || (sameOrigin(req) && req.headers["x-pi-csrf"] === "1");
 	const setUiSessionCookie = (req, res, value, maxAge = UI_SESSION_TTL_SECONDS) => {
 		res.setHeader(
 			"set-cookie",
@@ -125,11 +127,23 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
-		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/"))) {
-			// Phase 1 is Bearer-only; cookie writes require phase-3 CSRF and ownership.
-			if (!bearerAuthorized(req)) { res.writeHead(401).end(); return; }
+		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/") || url.pathname.startsWith("/api/managed/"))) {
+			const runnerTransfer = url.pathname.startsWith("/api/managed/snapshots/");
+			if (!(runnerTransfer ? bearerAuthorized(req) : uiAuthorized(req))) { res.writeHead(401).end(); return; }
+			if (req.method !== "GET" && !csrfAuthorized(req)) { res.writeHead(403).end(); return; }
 			void managed.http(req, res, url);
 			return;
+		}
+		if (req.method === "GET" && (url.pathname === "/threads" || url.pathname === "/threads/" || /^\/threads\/[0-9a-f-]{36}$/i.test(url.pathname))) {
+			res.setHeader("content-type", "text/html; charset=utf-8");
+			res.setHeader("cache-control", "no-store");
+			res.end(readFileSync(new URL("./threads.html", import.meta.url))); return;
+		}
+		if (req.method === "POST" && url.pathname === "/api/logout") {
+			if (!uiAuthorized(req)) { res.writeHead(401).end(); return; }
+			if (!csrfAuthorized(req)) { res.writeHead(403).end(); return; }
+			setUiSessionCookie(req, res, "", 0);
+			res.writeHead(204).end(); return;
 		}
 		if (url.pathname === "/healthz") {
 			res.end("pi-tower");
@@ -150,6 +164,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/session") {
+			if (req.headers.origin && !sameOrigin(req)) { res.writeHead(403).end(); return; }
 			let body = "";
 			let tooLarge = false;
 			req.setEncoding("utf8");
@@ -224,17 +239,24 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	});
 
 	const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+	const frameLimit = Number(process.env.PI_TOWER_MANAGED_FRAME_BYTES ?? 512 * 1024);
+	if (!Number.isSafeInteger(frameLimit) || frameLimit < 1) throw new Error("invalid_managed_frame_limit");
+	const browserWss = new WebSocketServer({ noServer: true, maxPayload: frameLimit });
 	const routes = { "/runner": handleControl, "/runner-session": handleSession, "/attach": handleAttach, ...managed?.routes };
 
 	server.on("upgrade", (req, socket, head) => {
 		const url = new URL(req.url, "http://x");
-		const route = routes[url.pathname];
+		const managedStream = managed && /^\/api\/threads\/([^/]+)\/stream$/.exec(url.pathname);
+		if (managedStream) url.searchParams.set("thread", managedStream[1]);
+		const route = managedStream ? managed.routes["/managed/client"] : routes[url.pathname];
 		if (!route) {
 			socket.destroy();
 			return;
 		}
-		wss.handleUpgrade(req, socket, head, (ws) => {
-			if (!bearerAuthorized(req)) {
+		const handler = managedStream || url.pathname === "/managed/client" ? browserWss : wss;
+		handler.handleUpgrade(req, socket, head, (ws) => {
+			ws.on("error", () => {}); // Protocol/frame errors close the peer, not the Tower process.
+			if (!(managedStream ? bearerAuthorized(req) || (uiSessionAuthorized(req) && sameOrigin(req)) : bearerAuthorized(req))) {
 				ws.close(4001, "bad token");
 				return;
 			}
@@ -247,7 +269,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	// Proxies (Cloudflare's edge among them) drop idle connections; a WebSocket peer that misses
 	// two pings is gone, while SSE comments keep browser streams open.
 	const heartbeat = setInterval(() => {
-		for (const ws of wss.clients) {
+		for (const ws of [...wss.clients, ...browserWss.clients]) {
 			if (ws.isAlive === false) {
 				ws.terminate();
 				continue;
@@ -420,12 +442,18 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		});
 	}
 
+	server.shutdown = async () => {
+		for (const ws of [...wss.clients, ...browserWss.clients]) ws.terminate();
+		for (const res of uiStreams) res.end();
+		server.closeAllConnections();
+		await new Promise((resolve) => server.close(resolve));
+	};
 	return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
 	const { port, token, idleTtlMs, dataDir } = parseArgs(process.argv.slice(2));
-	createTower({ token, idleTtlMs, dataDir }).listen(port, () => console.log(`pi-tower listening on :${port}`));
+	const server = createTower({ token, idleTtlMs, dataDir }).listen(port, () => console.log(`pi-tower listening on :${port}`));
 	// As container PID 1, node has no default signal dispositions, so docker stop would otherwise hang 10s to SIGKILL.
-	for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(0));
+	for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => { await server.shutdown(); process.exit(0); });
 }

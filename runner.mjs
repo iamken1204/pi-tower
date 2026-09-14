@@ -18,7 +18,7 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
-			console.log("pi-runner --hq <ws(s)://host> [--id name] [--token t | --token-file path] [-- <pi args>]\nManaged: --managed-threads --data-dir <path> [--pi-package <npm package directory>]\n--managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_RUNNER_DATA_DIR supplies --data-dir. Managed mode rejects passthrough pi args.");
+			console.log("pi-runner --hq <ws(s)://host> [--id name] [--token t | --token-file path] [-- <pi args>]\nManaged: --managed-threads --data-dir <path> [--pi-package <npm package directory>]\n--managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_RUNNER_DATA_DIR supplies --data-dir. Managed mode rejects passthrough pi args.\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--hq") opts.hq = argv[++i];

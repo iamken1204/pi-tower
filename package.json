@@ -32,12 +32,13 @@
 		"managed-*.mjs",
 		"extension.ts",
 		"ui.html",
+		"threads.html",
 		"skills",
 		"README.md",
 		"LICENSE"
 	],
 	"scripts": {
-		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs && node test/compat/verify-pi.mjs && node test/compat/verify-crash.mjs && node test/verify-managed.mjs",
+		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs && node test/compat/verify-pi.mjs && node test/compat/verify-crash.mjs && node test/verify-managed.mjs && node test/verify-journal.mjs && node test/verify-snapshots.mjs && node test/verify-snapshot-crash.mjs && node test/verify-managed-limits.mjs && node test/verify-prepare-crash.mjs",
 		"verify:phase0": "node test/compat/verify-isolated.mjs",
 		"prepublishOnly": "npm run verify"
 	},

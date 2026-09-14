@@ -1,10 +1,13 @@
 import { spawn, execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmdirSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkpoint, durableWrite, loadCheckpoint, privateDirectory, readJson, syncFile, uuid } from "./managed-storage.mjs";
+import { CommandJournal, commandPayload } from "./managed-journal.mjs";
+import { parseEnvelope } from "./managed-snapshots.mjs";
+import { holdWriterLock } from "./managed-lock.mjs";
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -16,15 +19,17 @@ export class ManagedRunner {
 		this.bootId = randomUUID();
 		this.idleTtlMs = idleTtlMs;
 		this.maxAwake = maxAwake;
+		this.maxSnapshotBytes = Number(process.env.PI_RUNNER_MAX_SNAPSHOT_BYTES ?? 64 * 1024 * 1024);
+		if (!Number.isSafeInteger(this.maxSnapshotBytes) || this.maxSnapshotBytes < 1) throw new Error("invalid_snapshot_limit");
 		this.piPackage = piPackage || resolve(execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "@earendil-works/pi-coding-agent");
 		if (readJson(resolve(this.piPackage, "package.json")).version !== "0.85.1") throw new Error("managed mode requires pi 0.85.1");
 		privateDirectory(this.dataDir);
 		this.lock = resolve(this.dataDir, "writer.lock");
-		// Never steal a stale lock: wrapper death says nothing about child death.
-		try { mkdirSync(this.lock, { mode: 0o700 }); } catch (error) {
-			if (error.code === "EEXIST") throw new Error("writer_locked: another wrapper or an unconfirmed child may exist; refusing startup");
-			throw error;
-		}
+		this.writerGuard = holdWriterLock(resolve(this.dataDir, "writer.sqlite"));
+		// Pre-lock-protocol children cannot be proven dead. Their old marker is never stolen.
+		if (existsSync(this.lock) && !existsSync(resolve(this.lock, "kernel-v1.json"))) throw new Error("writer_locked: legacy child exit is unconfirmed");
+		mkdirSync(this.lock, { recursive: true, mode: 0o700 });
+		durableWrite(resolve(this.lock, "kernel-v1.json"), { version: 1 });
 		syncFile(this.dataDir);
 		const identityFile = resolve(this.dataDir, "instance.json");
 		if (!existsSync(identityFile)) durableWrite(identityFile, { version: 1, instanceId: randomUUID(), runnerId: id, host: hostname() });
@@ -34,12 +39,33 @@ export class ManagedRunner {
 		this.threads = new Map();
 		privateDirectory(resolve(this.dataDir, "threads"));
 		for (const name of readdirSync(resolve(this.dataDir, "threads"))) {
+			if (name.startsWith(".prepare-")) continue; // Never published or used by a child; retain crash evidence.
 			const recordFile = resolve(this.dataDir, "threads", uuid(name), "record.json");
 			const record = readJson(recordFile);
 			this.validateRecord(record, name);
-			if (record.awake) throw new Error("unconfirmed_runtime: refusing to start a second writer");
-			this.threads.set(name, { record, recordFile, state: "sleeping", runtime: null });
+			const entry = this.entry(record, recordFile);
+			if (record.awake) this.recoverExited(entry);
+			this.threads.set(name, entry);
 		}
+	}
+
+	recoverExited(entry) {
+		const guard = holdWriterLock(resolve(entry.recordFile, "../runtime.sqlite"));
+		try {
+			const record = entry.record;
+			loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, record.effectiveCwd, true);
+			record.awake = false;
+			record.interrupted = true;
+			durableWrite(entry.recordFile, record);
+			entry.state = "interrupted";
+		} finally { guard.close(); }
+	}
+
+	entry(record, recordFile) {
+		const syncFile = resolve(recordFile, "../sync.json");
+		return { record, recordFile, state: record.interrupted ? "interrupted" : "sleeping", activeCommand: record.runId ?? null, runtime: null, counter: 0, sequence: 0, dialogs: new Map(),
+			journal: new CommandJournal(resolve(recordFile, "../commands"), this.bootId), syncFile,
+			sync: existsSync(syncFile) ? readJson(syncFile) : { ack: null, pending: null } };
 	}
 
 	validateRecord(record, threadId) {
@@ -51,27 +77,167 @@ export class ManagedRunner {
 	}
 
 	inventory() {
-		return [...this.threads.values()].map(({ record, state }) => ({ threadId: record.threadId, workspaceId: record.workspaceId,
-			piSessionId: record.piSessionId, state }));
+		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs }) => ({ threadId: record.threadId, workspaceId: record.workspaceId,
+			piSessionId: record.piSessionId, state, runId: activeCommand ?? null, pendingDialogs: [...dialogs.values()],
+			missingSession: !existsSync(record.sessionFile),
+			sync: syncError ? "error" : cloudCheck || sync.pending || !sync.ack ? "pending" : "synced", latestRevision: sync.ack?.revision ?? null }));
 	}
 
 	prepare(threadId) {
 		uuid(threadId);
 		if (this.threads.has(threadId)) return this.info(threadId);
 		const dir = resolve(this.dataDir, "threads", threadId);
-		mkdirSync(dir, { mode: 0o700 });
+		const preparing = resolve(this.dataDir, "threads", `.prepare-${threadId}-${randomUUID()}`);
+		mkdirSync(preparing, { mode: 0o700 });
 		const record = { version: 1, threadId, runnerInstanceId: this.identity.instanceId, workspaceId: randomUUID(),
 			effectiveCwd: this.cwd, piSessionId: randomUUID(), sessionFile: resolve(dir, "session.jsonl"),
 			checkpointFile: resolve(dir, "checkpoint.json"), awake: false };
 		const header = { type: "session", version: 3, id: record.piSessionId, timestamp: new Date().toISOString(), cwd: this.cwd };
-		writeFileSync(record.sessionFile, `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
-		syncFile(record.sessionFile);
-		durableWrite(record.checkpointFile, checkpoint(header, [], null));
-		const entry = { record, recordFile: resolve(dir, "record.json"), state: "sleeping", runtime: null };
-		durableWrite(entry.recordFile, record);
+		writeFileSync(resolve(preparing, "session.jsonl"), `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
+		syncFile(resolve(preparing, "session.jsonl"));
+		durableWrite(resolve(preparing, "checkpoint.json"), checkpoint(header, [], null));
+		durableWrite(resolve(preparing, "record.json"), record);
+		renameSync(preparing, dir); // Publish the entire registry/session/checkpoint bundle atomically.
 		syncFile(resolve(this.dataDir, "threads"));
+		const entry = this.entry(record, resolve(dir, "record.json"));
 		this.threads.set(threadId, entry);
 		return this.info(threadId);
+	}
+
+	stageSnapshot(entry, settled = true) {
+		if (entry.sync.pending) return;
+		const value = readJson(entry.record.checkpointFile);
+		const verified = checkpoint(value.header, value.entries, value.leafId);
+		if (verified.hash !== value.hash) throw new Error("checkpoint_hash_mismatch");
+		const fingerprint = JSON.stringify([value.hash, settled, entry.activeCommand ?? null]);
+		if (entry.sync.ack?.fingerprint === fingerprint) return;
+		const envelope = { schemaVersion: 1, threadId: entry.record.threadId, runnerInstanceId: this.identity.instanceId,
+			piSessionId: entry.record.piSessionId, piVersion: "0.85.1", revision: { generationId: entry.generationId ?? this.bootId, counter: ++entry.counter },
+			previous: entry.sync.ack ? { revision: entry.sync.ack.revision, hash: entry.sync.ack.hash } : null,
+			capturedAt: new Date().toISOString(), settled, runId: entry.activeCommand ?? null,
+			header: value.header, entries: value.entries, leafId: value.leafId };
+		const next = { ...entry.sync, pending: { bytes: JSON.stringify(envelope), fingerprint } };
+		durableWrite(entry.syncFile, next);
+		entry.sync = next;
+	}
+
+	syncSnapshot(entry) {
+		if (entry.restoring || entry.quarantined) return;
+		if (entry.syncing) return entry.syncing;
+		entry.syncing = (async () => {
+			if (!this.reconciled || !this.connectionId || this.ws?.readyState !== 1) return;
+			if (entry.cloudCheck) await this.reconcileSnapshot(entry);
+			for (let i = 0; i < 2; i++) {
+				this.stageSnapshot(entry, !["running", "waiting_input"].includes(entry.state));
+				const pending = entry.sync.pending;
+				if (!pending) return;
+				const response = await fetch(`${this.httpUrl}/api/managed/snapshots/${entry.record.threadId}`, {
+					method: "PUT", headers: { authorization: `Bearer ${this.token}`, "x-runner-instance": this.identity.instanceId,
+						"x-runner-connection": this.connectionId }, body: pending.bytes, signal: AbortSignal.timeout(10000),
+				});
+				if (!response.ok) {
+					const error = await response.json();
+					if (error.error === "snapshot_stale_predecessor") { entry.cloudCheck = true; await this.reconcileSnapshot(entry); continue; }
+					entry.syncError = true; throw new Error(error.error || "snapshot_upload_rejected");
+				}
+				const ack = await response.json();
+				if (ack.hash !== createHash("sha256").update(pending.bytes).digest("hex") || JSON.stringify(ack.revision) !== JSON.stringify(JSON.parse(pending.bytes).revision)) throw new Error("invalid_snapshot_ack");
+				const next = { ack: { ...ack, fingerprint: pending.fingerprint }, pending: null };
+				durableWrite(entry.syncFile, next);
+				entry.sync = next;
+				entry.syncError = false;
+				entry.lastSyncError = null;
+				this.emit?.({ type: "runtime_state", ...this.info(entry.record.threadId) });
+			}
+		})().catch((error) => {
+			if (error.code === "ENOSPC" || error.code === "EIO" || error.message === "invalid_snapshot_ack") entry.syncError = true;
+			const code = error.code || (error instanceof SyntaxError ? "invalid_json" : error.message);
+			if (entry.lastSyncError !== code) console.error(JSON.stringify({ event: "snapshot_sync_failed", threadId: entry.record.threadId, bootId: this.bootId, code }));
+			entry.lastSyncError = code;
+			if (entry.syncError) this.emit?.({ type: "runtime_state", ...this.info(entry.record.threadId) });
+		}).finally(() => { entry.syncing = null; });
+		return entry.syncing;
+	}
+
+	async reconcileSnapshot(entry) {
+		const connectionId = this.connectionId;
+		const response = await fetch(`${this.httpUrl}/api/managed/snapshots/${entry.record.threadId}?latest=1`, {
+			headers: { authorization: `Bearer ${this.token}`, "x-runner-instance": this.identity.instanceId, "x-runner-connection": connectionId }, signal: AbortSignal.timeout(10000),
+		});
+		if (!response.ok && response.status !== 404) throw new Error("snapshot_reconciliation_failed");
+		let remote = null, hash = null;
+		if (response.ok) {
+			const chunks = []; let size = 0;
+			for await (const chunk of response.body) { size += chunk.length; if (size > this.maxSnapshotBytes) throw new Error("snapshot_too_large"); chunks.push(chunk); }
+			const bytes = Buffer.concat(chunks);
+			hash = createHash("sha256").update(bytes).digest("hex");
+			if (hash !== response.headers.get("x-snapshot-hash")) throw new Error("invalid_snapshot_ack");
+			remote = parseEnvelope(bytes, entry.record);
+		}
+		if (connectionId !== this.connectionId) throw new Error("stale_connection");
+		const local = readJson(entry.record.checkpointFile);
+		if (checkpoint(local.header, local.entries, local.leafId).hash !== local.hash) throw new Error("checkpoint_hash_mismatch");
+		const candidates = [remote, entry.sync.pending && parseEnvelope(Buffer.from(entry.sync.pending.bytes), entry.record)].filter(Boolean);
+		for (const candidate of candidates) {
+			if (JSON.stringify(candidate.header) !== JSON.stringify(local.header) || candidate.entries.length > local.entries.length ||
+				!candidate.entries.every((item, index) => JSON.stringify(item) === JSON.stringify(local.entries[index])) ||
+				(candidate === remote && candidate.entries.length === local.entries.length && candidate.leafId !== local.leafId)) {
+				entry.syncError = true; throw new Error("snapshot_divergence");
+			}
+		}
+		// A backup may have rolled Tower back. Re-publish the verified superset under a fresh generation;
+		// never rewrite local pi context, reuse old revision values, or lose uncertain outbox evidence.
+		durableWrite(resolve(entry.recordFile, `../reconciled-${randomUUID()}.json`), entry.sync);
+		const next = { ack: remote ? { revision: remote.revision, hash } : null, pending: null };
+		durableWrite(entry.syncFile, next);
+		entry.sync = next; entry.generationId = randomUUID(); entry.counter = 0; entry.cloudCheck = false;
+	}
+
+	async restore(entry, input) {
+		const { record } = entry;
+		const requireMissing = () => {
+			if (entry.runtime || record.awake || existsSync(record.sessionFile)) throw new Error("restore_requires_missing_session_and_no_child");
+			if (realpathSync(record.effectiveCwd) !== record.effectiveCwd) throw new Error("workspace_changed");
+		};
+		requireMissing();
+		if (entry.restoring) throw new Error("restore_in_progress");
+		entry.restoring = true;
+		try {
+			await entry.syncing;
+			const response = await fetch(`${this.httpUrl}/api/managed/snapshots/${record.threadId}?restore=${uuid(input.restoreId)}`, {
+				headers: { authorization: `Bearer ${this.token}`, "x-runner-instance": this.identity.instanceId, "x-runner-connection": this.connectionId }, signal: AbortSignal.timeout(10000),
+			});
+			if (!response.ok) throw new Error("restore_download_rejected");
+			const chunks = []; let length = 0;
+			for await (const chunk of response.body) { length += chunk.length; if (length > this.maxSnapshotBytes) throw new Error("snapshot_too_large"); chunks.push(chunk); }
+			const bytes = Buffer.concat(chunks);
+			if (createHash("sha256").update(bytes).digest("hex") !== input.hash) throw new Error("restore_hash_mismatch");
+			const envelope = parseEnvelope(bytes, record);
+			if (JSON.stringify(envelope.revision) !== JSON.stringify(input.expectedRevision) || envelope.header.cwd !== record.effectiveCwd) throw new Error("restore_identity_mismatch");
+			requireMissing();
+			const value = checkpoint(envelope.header, envelope.entries, envelope.leafId);
+			// Preserve any unique unsynced checkpoint/outbox evidence before restoring cloud history.
+			durableWrite(resolve(entry.recordFile, `../recovery-${input.restoreId}.json`), { checkpoint: readJson(record.checkpointFile), sync: entry.sync });
+			writeFileSync(record.sessionFile, [envelope.header, ...envelope.entries].map((item) => JSON.stringify(item)).join("\n") + "\n", { flag: "wx", mode: 0o600 });
+			syncFile(record.sessionFile);
+			durableWrite(record.checkpointFile, value);
+			const sync = { ack: { revision: envelope.revision, hash: input.hash, fingerprint: JSON.stringify([value.hash, envelope.settled, envelope.runId]) }, pending: null };
+			durableWrite(entry.syncFile, sync);
+			entry.sync = sync; entry.syncError = false; entry.state = "sleeping";
+			loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, record.effectiveCwd);
+			return this.info(record.threadId);
+		} finally { entry.restoring = false; }
+	}
+
+	commandStatus(entry, commandId, status) {
+		const receipt = entry.journal.transition(commandId, status);
+		this.emit?.({ type: "command_status", threadId: entry.record.threadId, receipt });
+		return receipt;
+	}
+
+	requireDriver(entry, epoch) {
+		if (!this.reconciled || entry.quarantined || !entry.driver || !epoch || epoch.connectionId !== this.connectionId ||
+			JSON.stringify(epoch) !== JSON.stringify(entry.epoch)) throw new Error("stale_ownership");
 	}
 
 	info(threadId) {
@@ -81,16 +247,19 @@ export class ManagedRunner {
 	}
 
 	async open(entry) {
+		if (entry.restoring) throw new Error("restore_in_progress");
 		if (entry.runtime) {
 			await entry.runtime.ready;
 			return entry.runtime;
 		}
-		if (entry.state !== "sleeping") throw new Error("runtime_unavailable");
+		if (!["sleeping", "interrupted"].includes(entry.state)) throw new Error("runtime_unavailable");
+		if (entry.record.awake) this.recoverExited(entry);
 		if ([...this.threads.values()].filter((e) => e.runtime).length >= this.maxAwake) throw new Error("awake_limit");
 		const record = entry.record;
 		if (realpathSync(record.effectiveCwd) !== record.effectiveCwd) throw new Error("workspace_changed");
 		loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, record.effectiveCwd);
 		record.awake = true;
+		record.interrupted = false;
 		durableWrite(entry.recordFile, record); // Before spawn: any uncertain startup requires operator recovery.
 		entry.state = "starting";
 		const child = spawn(process.execPath, [fileURLToPath(new URL("./managed-pi.mjs", import.meta.url)), this.piPackage, entry.recordFile], {
@@ -109,9 +278,15 @@ export class ManagedRunner {
 						record.awake = false;
 						durableWrite(entry.recordFile, record);
 						entry.state = "sleeping";
+						this.stageSnapshot(entry);
 					} catch { entry.state = "error"; }
-				} else entry.state = "interrupted";
+				} else {
+					entry.state = "interrupted";
+					if (entry.activeCommand) this.commandStatus(entry, entry.activeCommand, "unknown");
+				}
+				entry.dialogs.clear();
 				entry.runtime = null;
+				this.emit?.({ type: "runtime_state", ...this.info(record.threadId) });
 				done();
 			});
 		});
@@ -119,7 +294,18 @@ export class ManagedRunner {
 		child.stdin.on("error", () => {}); // Exit rejects pending requests; the durable awake marker remains.
 		child.on("message", (message) => {
 			if (message.type === "saved_shutdown") runtime.savedShutdown = true;
-			if (message.type === "checkpoint") { entry.state = "idle"; this.armIdle(entry); }
+			if (message.type === "checkpoint") {
+				if (message.settled !== false) {
+					entry.state = "idle";
+					entry.dialogs.clear();
+					if (entry.activeCommand) this.commandStatus(entry, entry.activeCommand, "settled");
+					for (const commandId of entry.dialogCommands ?? []) this.commandStatus(entry, commandId, "settled");
+					entry.dialogCommands = [];
+					this.armIdle(entry);
+				}
+				try { this.stageSnapshot(entry, message.settled !== false); void this.syncSnapshot(entry); }
+				catch { entry.syncError = true; }
+			}
 			if (message.type === "checkpoint_error") entry.state = "error";
 		});
 		let buffer = "";
@@ -137,8 +323,11 @@ export class ManagedRunner {
 					const p = runtime.pending.get(event.id);
 					if (p) { clearTimeout(p.timer); runtime.pending.delete(event.id); event.success ? p.resolve(event.data) : p.reject(new Error(`pi_rejected: ${event.error}`)); }
 				}
-				if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) entry.state = "waiting_input";
-				this.emit?.({ type: "pi_event", threadId: record.threadId, event });
+				if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) {
+					entry.state = "waiting_input"; entry.dialogs.set(event.id, event);
+				}
+				if (event.type !== "response") this.emit?.({ type: "pi_event", threadId: record.threadId, bootId: this.bootId, runId: entry.activeCommand ?? null, sequence: ++entry.sequence, event });
+				if (event.type === "extension_ui_request") this.emit?.({ type: "runtime_state", ...this.info(record.threadId) });
 			}
 		});
 		runtime.ready = this.rpc(runtime, "get_state").then((state) => {
@@ -165,9 +354,9 @@ export class ManagedRunner {
 		entry.idle = setTimeout(() => { this.sleep(entry).catch(() => { entry.state = "error"; }); }, this.idleTtlMs);
 	}
 
-	async sleep(entry) {
+	async sleep(entry, driven = false) {
 		if (!entry.runtime) return;
-		if (entry.state !== "idle" || entry.driver) throw new Error("runtime_busy");
+		if (entry.state !== "idle" || (entry.driver && !driven)) throw new Error("runtime_busy");
 		entry.state = "stopping";
 		const runtime = entry.runtime;
 		runtime.closing = true;
@@ -178,36 +367,85 @@ export class ManagedRunner {
 		if (entry.state !== "sleeping") throw new Error("unclean_shutdown");
 	}
 
-	async request({ operation, threadId, message }) {
+	async request(input) {
+		const { operation, threadId, message, commandId, targetRunId, dialogId, value } = input;
 		if (this.stopping) throw new Error("runner_stopping");
 		if (operation === "prepare") return this.prepare(threadId);
 		this.info(threadId);
 		const entry = this.threads.get(threadId);
 		if (operation === "state") return this.info(threadId);
+		if (operation === "restore") return this.restore(entry, input);
+		if (operation === "ownership") {
+			const epoch = input.epoch;
+			if (!this.reconciled || epoch?.connectionId !== this.connectionId || epoch?.bootId !== this.bootId || !Number.isSafeInteger(epoch.counter) || epoch.counter < 1) throw new Error("stale_ownership");
+			uuid(epoch.incarnation);
+			if (entry.epoch?.connectionId === epoch.connectionId && epoch.counter <= entry.epoch.counter) throw new Error("stale_ownership");
+			entry.epoch = epoch;
+			entry.driver = input.driver === true;
+			this.armIdle(entry);
+			return { epoch };
+		}
+		if (operation === "sync") { this.stageSnapshot(entry); void this.syncSnapshot(entry); return this.info(threadId); }
+		if (operation === "command") return entry.journal.get(commandId);
 		if (operation === "release") { entry.driver = false; this.armIdle(entry); return this.info(threadId); }
-		if (operation === "sleep") { entry.driver = false; await this.sleep(entry); return this.info(threadId); }
+		if (operation === "sleep") { this.requireDriver(entry, input.epoch); await this.sleep(entry, true); return this.info(threadId); }
 		if (operation === "entries") {
 			if (entry.runtime) return this.rpc(await this.open(entry), "get_entries");
 			const saved = loadCheckpoint(entry.record.checkpointFile, entry.record.sessionFile, entry.record.piSessionId, entry.record.effectiveCwd);
 			return { entries: saved.entries, leafId: saved.leafId };
 		}
-		if (operation === "abort") {
-			if (entry.runtime) await this.rpc(await this.open(entry), "abort");
-			return this.info(threadId);
+		this.requireDriver(entry, input.epoch);
+		const payload = commandPayload(input);
+		uuid(commandId);
+		const previous = entry.journal.get(commandId);
+		const receipt = entry.journal.receive(commandId, payload, input.epoch);
+		if (previous) return receipt;
+		try {
+			if (operation === "prompt") {
+				if (entry.syncError) throw new Error("sync_error");
+				if (entry.cloudCheck) throw new Error("sync_reconciling");
+				if (!["sleeping", "idle", "interrupted"].includes(entry.state)) throw new Error("runtime_busy");
+				clearTimeout(entry.idle);
+				const runtime = await this.open(entry);
+				this.requireDriver(entry, input.epoch); // A takeover may occur while the child is starting.
+				if (entry.state !== "idle") throw new Error("runtime_busy");
+				entry.state = "running";
+				entry.activeCommand = commandId;
+				entry.record.runId = commandId;
+				durableWrite(entry.recordFile, entry.record);
+				this.commandStatus(entry, commandId, "dispatching");
+				void this.rpc(runtime, "prompt", { message }).then(() => {
+					this.commandStatus(entry, commandId, "accepted");
+				}).catch(() => { this.commandStatus(entry, commandId, "unknown"); });
+				return entry.journal.get(commandId);
+			}
+			if (!entry.runtime || !targetRunId || targetRunId !== entry.activeCommand) throw new Error("stale_run");
+			if (operation === "abort") {
+				this.commandStatus(entry, commandId, "dispatching");
+				await this.rpc(entry.runtime, "abort");
+				return this.commandStatus(entry, commandId, "settled");
+			}
+			const dialog = entry.dialogs.get(dialogId);
+			if (!dialog || (dialog.method === "confirm" ? typeof value !== "boolean" : typeof value !== "string")) throw new Error("stale_or_invalid_dialog");
+			this.commandStatus(entry, commandId, "dispatching");
+			entry.runtime.child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: dialogId,
+				...(dialog.method === "confirm" ? { confirmed: value } : { value }) })}\n`);
+			(entry.dialogCommands ??= []).push(commandId);
+			entry.dialogs.delete(dialogId);
+			entry.state = "running";
+			return entry.journal.get(commandId);
+		} catch (error) {
+			this.commandStatus(entry, commandId, entry.journal.get(commandId).status === "received" ? "rejected" : "unknown");
+			throw error;
+		} finally {
+			this.emit?.({ type: "runtime_state", ...this.info(threadId) });
 		}
-		if (operation !== "prompt" || typeof message !== "string" || !message.trim() || message.trimStart().startsWith("/") || Buffer.byteLength(message) > 256 * 1024) throw new Error("invalid_command");
-		if (!["sleeping", "idle"].includes(entry.state)) throw new Error("runtime_busy");
-		entry.driver = true;
-		clearTimeout(entry.idle);
-		const runtime = await this.open(entry);
-		if (entry.state !== "idle") throw new Error("runtime_busy");
-		entry.state = "running";
-		// No retries: phase 2 will add durable command receipts and reconciliation.
-		await this.rpc(runtime, "prompt", { message });
-		return this.info(threadId);
 	}
 
 	connect({ hq, token }) {
+		this.httpUrl = hq.replace(/^ws/, "http");
+		this.token = token;
+		this.syncTimer = setInterval(() => { for (const entry of this.threads.values()) void this.syncSnapshot(entry); }, 5000);
 		const dial = () => {
 			if (this.stopping) return;
 			const ws = new WebSocket(`${hq}/managed/runner?id=${encodeURIComponent(this.id)}&instance=${this.identity.instanceId}&boot=${this.bootId}`, { headers: { authorization: `Bearer ${token}` } });
@@ -218,17 +456,42 @@ export class ManagedRunner {
 				try {
 					envelope = JSON.parse(data);
 					if (envelope.type === "welcome") { this.connectionId = uuid(envelope.connectionId); this.emit({ type: "inventory", threads: this.inventory(), piVersion: "0.85.1" }); return; }
+					if (envelope.type === "inventory_ready" && envelope.connectionId === this.connectionId) {
+						for (const entry of this.threads.values()) {
+							for (const receipt of entry.journal.all()) this.emit({ type: "command_status", threadId: entry.record.threadId, receipt });
+						}
+						this.emit({ type: "reconciled", connectionId: this.connectionId });
+						return;
+					}
+					if (envelope.type === "inventory_confirmed" && envelope.connectionId === this.connectionId) {
+						this.reconciled = true;
+						for (const entry of this.threads.values()) {
+							entry.quarantined = envelope.quarantined?.includes(entry.record.threadId) === true;
+							if (entry.quarantined) {
+								console.error(JSON.stringify({ event: "thread_missing_from_catalog", threadId: entry.record.threadId, bootId: this.bootId }));
+								continue;
+							}
+							const head = envelope.heads?.find((item) => item.threadId === entry.record.threadId)?.head;
+							const pendingHash = entry.sync.pending && createHash("sha256").update(entry.sync.pending.bytes).digest("hex");
+							entry.cloudCheck = (head?.hash ?? null) !== (entry.sync.ack?.hash ?? null) && head?.hash !== pendingHash;
+							void this.syncSnapshot(entry);
+						}
+						return;
+					}
 					if (envelope.version !== 1 || envelope.connectionId !== this.connectionId || this.ws !== ws || ws.readyState !== 1) throw new Error("stale_connection");
 					uuid(envelope.requestId);
 					const result = await this.request(envelope);
 					if (ws.readyState === 1) ws.send(JSON.stringify({ version: 1, type: "result", requestId: envelope.requestId, result }));
 				} catch (error) {
-					if (ws.readyState === 1) ws.send(JSON.stringify({ version: 1, type: "result", requestId: envelope?.requestId, error: error.message }));
+					const code = error.code || (error instanceof SyntaxError ? "invalid_json" : error.message.startsWith("pi_rejected:") ? "pi_rejected" : error.message);
+					console.error(JSON.stringify({ event: "managed_request_failed", threadId: envelope?.threadId, commandId: envelope?.commandId, bootId: this.bootId, code }));
+					if (ws.readyState === 1) ws.send(JSON.stringify({ version: 1, type: "result", requestId: envelope?.requestId, error: code }));
 				}
 			};
 			ws.onclose = () => {
 				this.connectionId = null;
-				for (const entry of this.threads.values()) { entry.driver = false; this.armIdle(entry); }
+				this.reconciled = false;
+				for (const entry of this.threads.values()) { entry.driver = false; entry.epoch = null; this.armIdle(entry); }
 				this.retry = setTimeout(dial, 3000);
 			};
 			ws.onerror = () => {};
@@ -239,6 +502,7 @@ export class ManagedRunner {
 	async close() {
 		this.stopping = true;
 		clearTimeout(this.retry);
+		clearInterval(this.syncTimer);
 		this.ws?.close();
 		await Promise.all([...this.threads.values()].map(async (entry) => {
 			entry.driver = false;
@@ -253,7 +517,9 @@ export class ManagedRunner {
 			} catch { entry.runtime?.child.kill("SIGKILL"); }
 		}));
 		if ([...this.threads.values()].some((entry) => entry.record.awake)) throw new Error("unclean_shutdown: writer lock retained");
+		unlinkSync(resolve(this.lock, "kernel-v1.json"));
 		rmdirSync(this.lock);
 		syncFile(this.dataDir);
+		this.writerGuard.close();
 	}
 }

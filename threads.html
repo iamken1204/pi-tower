@@ -1,0 +1,1651 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#e8e7df" />
+		<title>Pi Tower — Threads</title>
+		<style>
+			:root {
+				--paper: #e8e7df;
+				--raised: #f4f3eb;
+				--ink: #11120f;
+				--muted: #575850;
+				--signal: #d83b00;
+				--yellow: #f5d90a;
+				--blue: #1753d1;
+				--cyan: #42c7d9;
+				--green: #126b37;
+				font-family: "SFMono-Regular", "Roboto Mono", "Liberation Mono", Menlo, Consolas, monospace;
+				font-synthesis: none;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			html {
+				background: var(--ink);
+			}
+			body {
+				margin: 0;
+				min-width: 20rem;
+				min-height: 100vh;
+				background: var(--paper);
+				color: var(--ink);
+				font-size: 14px;
+				line-height: 1.45;
+				-webkit-font-smoothing: antialiased;
+			}
+			button,
+			input,
+			select,
+			textarea {
+				font: inherit;
+				color: inherit;
+			}
+			button {
+				cursor: pointer;
+			}
+			button:disabled,
+			input:disabled,
+			textarea:disabled {
+				cursor: not-allowed;
+				opacity: 0.5;
+			}
+			a {
+				color: inherit;
+			}
+			:focus-visible {
+				outline: 3px solid var(--blue);
+				outline-offset: 2px;
+			}
+			.hidden {
+				display: none !important;
+			}
+			.skip {
+				position: fixed;
+				z-index: 20;
+				top: 0.5rem;
+				left: 0.5rem;
+				transform: translateY(-150%);
+				padding: 0.6rem;
+				background: var(--ink);
+				color: var(--paper);
+			}
+			.skip:focus {
+				transform: none;
+			}
+			.shell {
+				width: min(100%, 100rem);
+				min-height: 100vh;
+				margin: auto;
+				border-inline: 1px solid var(--ink);
+			}
+			.masthead {
+				position: sticky;
+				top: 0;
+				z-index: 10;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				min-height: 3.5rem;
+				background: color-mix(in srgb, var(--paper) 96%, transparent);
+				border-bottom: 1px solid;
+				backdrop-filter: blur(12px);
+			}
+			.brand {
+				display: flex;
+				min-width: 0;
+				text-decoration: none;
+			}
+			.colorbar {
+				display: grid;
+				grid-template-columns: repeat(4, 1fr);
+				width: 3.5rem;
+				flex: none;
+				border-right: 1px solid;
+			}
+			.colorbar i:nth-child(1) {
+				background: var(--signal);
+			}
+			.colorbar i:nth-child(2) {
+				background: var(--yellow);
+			}
+			.colorbar i:nth-child(3) {
+				background: var(--blue);
+			}
+			.colorbar i:nth-child(4) {
+				background: var(--cyan);
+			}
+			.wordmark {
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				padding: 0.4rem 0.7rem;
+			}
+			.wordmark strong,
+			h1,
+			h2 {
+				font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+				font-weight: 900;
+				letter-spacing: -0.025em;
+				text-transform: uppercase;
+			}
+			.wordmark strong {
+				font-size: 1.55rem;
+				line-height: 0.9;
+			}
+			.wordmark strong span {
+				color: var(--signal);
+			}
+			.eyebrow {
+				color: var(--muted);
+				font-size: 10px;
+				font-weight: 800;
+				letter-spacing: 0.07em;
+				text-transform: uppercase;
+			}
+			.head-actions {
+				display: flex;
+			}
+			.head-actions > * {
+				display: flex;
+				align-items: center;
+				padding: 0.5rem 0.8rem;
+				border: 0;
+				border-left: 1px solid;
+				background: transparent;
+				font-size: 11px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.head-actions a {
+				text-decoration: none;
+			}
+			.head-actions > *:hover {
+				background: var(--raised);
+			}
+			.notice {
+				display: grid;
+				grid-template-columns: 7rem 1fr;
+				border-bottom: 1px solid;
+			}
+			.notice strong,
+			.section-code {
+				padding: 0.7rem;
+				background: var(--yellow);
+				border-right: 1px solid;
+				font-size: 10px;
+				text-transform: uppercase;
+				letter-spacing: 0.06em;
+			}
+			.notice p {
+				margin: 0;
+				padding: 0.7rem;
+				font-weight: 700;
+			}
+			.notice[data-kind="error"] strong {
+				background: var(--signal);
+				color: white;
+			}
+			.notice[data-kind="success"] strong {
+				background: #c8dfca;
+			}
+			.auth {
+				max-width: 46rem;
+				margin: 10vh auto;
+				border: 1px solid;
+				background: var(--raised);
+			}
+			.auth h1 {
+				margin: 0;
+				padding: 1rem;
+				border-bottom: 1px solid;
+				font-size: 2.5rem;
+			}
+			.auth p {
+				margin: 0;
+				padding: 1rem;
+			}
+			.auth form {
+				display: grid;
+				grid-template-columns: 1fr auto;
+				border-top: 1px solid;
+			}
+			.auth label {
+				display: grid;
+				padding: 0.5rem 0.7rem;
+				font-size: 10px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.auth input {
+				width: 100%;
+				padding: 0.4rem 0;
+				border: 0;
+				background: transparent;
+				font-size: 16px;
+			}
+			.button {
+				min-height: 2.7rem;
+				padding: 0.65rem 0.85rem;
+				border: 1px solid;
+				background: transparent;
+				border-radius: 0;
+				font-size: 11px;
+				font-weight: 800;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+			}
+			.button:hover:not(:disabled) {
+				background: var(--ink);
+				color: var(--paper);
+			}
+			.button.primary {
+				background: var(--ink);
+				color: var(--paper);
+			}
+			.button.primary:hover:not(:disabled) {
+				background: var(--blue);
+			}
+			.button.danger:hover:not(:disabled) {
+				background: var(--signal);
+			}
+			.list-head {
+				display: grid;
+				grid-template-columns: 7rem minmax(10rem, 1fr) minmax(12rem, 22rem) auto;
+				border-bottom: 1px solid;
+			}
+			.section-code {
+				display: flex;
+				align-items: center;
+				background: var(--ink);
+				color: var(--paper);
+			}
+			.title-block {
+				padding: 0.65rem 0.8rem;
+			}
+			.title-block h1 {
+				margin: 0;
+				font-size: clamp(1.7rem, 3vw, 2.6rem);
+				line-height: 0.9;
+			}
+			.filters {
+				display: flex;
+				border-left: 1px solid;
+			}
+			.filters input,
+			.filters select {
+				min-width: 0;
+				width: 100%;
+				padding: 0.7rem;
+				border: 0;
+				border-radius: 0;
+				background: transparent;
+			}
+			.filters select {
+				width: 10rem;
+				border-left: 1px solid;
+			}
+			.archive-toggle {
+				display: flex;
+				align-items: center;
+				gap: 0.4rem;
+				padding: 0.5rem 0.7rem;
+				border-left: 1px solid;
+				font-size: 10px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.list-actions {
+				display: flex;
+				border-left: 1px solid;
+			}
+			.list-actions .button {
+				height: 100%;
+				border: 0;
+				border-left: 1px solid;
+			}
+			.thread-list {
+				margin: 0;
+				padding: 0;
+				list-style: none;
+			}
+			.thread-row {
+				display: grid;
+				grid-template-columns: minmax(12rem, 1fr) 11rem 12rem 13rem auto;
+				border-bottom: 1px solid;
+			}
+			.thread-row > a {
+				min-width: 0;
+				padding: 0.85rem;
+				text-decoration: none;
+			}
+			.thread-row > a:hover {
+				background: var(--raised);
+				box-shadow: inset 5px 0 var(--blue);
+			}
+			.thread-title {
+				display: block;
+				overflow: hidden;
+				font-size: 16px;
+				font-weight: 900;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.thread-id {
+				color: var(--muted);
+				font-size: 9px;
+			}
+			.cell {
+				display: flex;
+				min-width: 0;
+				align-items: center;
+				padding: 0.65rem;
+				border-left: 1px solid;
+				overflow-wrap: anywhere;
+			}
+			.row-actions {
+				display: flex;
+			}
+			.row-actions .button {
+				border-block: 0;
+				border-right: 0;
+			}
+			.pill {
+				display: inline-block;
+				padding: 0.15rem 0.35rem;
+				border: 1px solid;
+				font-size: 9px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.pill[data-state="running"],
+			.pill[data-state="waiting_input"] {
+				background: var(--yellow);
+			}
+			.pill[data-state="error"],
+			.pill[data-state="offline"] {
+				background: var(--signal);
+				color: white;
+			}
+			.pill[data-state="idle"],
+			.pill[data-state="synced"] {
+				background: #c8dfca;
+			}
+			.empty {
+				min-height: 15rem;
+				padding: 3rem;
+				background: repeating-linear-gradient(135deg, transparent 0 8px, #11120f0a 8px 9px);
+				border-bottom: 1px solid;
+			}
+			.empty h2 {
+				margin: 0;
+				font-size: clamp(2rem, 6vw, 4rem);
+			}
+			.load-more {
+				display: block;
+				margin: 1rem auto;
+			}
+			.thread-head {
+				display: grid;
+				grid-template-columns: 7rem minmax(0, 1fr) auto;
+				border-bottom: 1px solid;
+			}
+			.thread-head .title-block {
+				min-width: 0;
+			}
+			.thread-head h1 {
+				overflow-wrap: anywhere;
+			}
+			.thread-actions {
+				display: flex;
+			}
+			.thread-actions .button {
+				border-block: 0;
+				border-right: 0;
+			}
+			.status-grid {
+				display: grid;
+				grid-template-columns: repeat(5, minmax(0, 1fr));
+				border-bottom: 1px solid;
+			}
+			.status-item {
+				padding: 0.55rem 0.7rem;
+				border-right: 1px solid;
+			}
+			.status-item:last-child {
+				border: 0;
+			}
+			.status-item b {
+				display: block;
+				margin-top: 0.2rem;
+				font-size: 12px;
+			}
+			.conversation {
+				width: min(100%, 64rem);
+				min-height: 45vh;
+				margin: auto;
+				padding: 1.25rem;
+			}
+			.entry {
+				margin-bottom: 1.25rem;
+				border: 1px solid;
+				background: var(--raised);
+			}
+			.entry-head {
+				display: flex;
+				justify-content: space-between;
+				padding: 0.4rem 0.6rem;
+				background: var(--ink);
+				color: var(--paper);
+				font-size: 10px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.entry-body {
+				padding: 0.8rem;
+				overflow-wrap: anywhere;
+			}
+			.entry[data-role="user"] {
+				margin-left: 10%;
+				border-left: 5px solid var(--blue);
+			}
+			.entry[data-role="assistant"] {
+				margin-right: 10%;
+			}
+			.entry pre {
+				max-width: 100%;
+				margin: 0.7rem 0;
+				padding: 0.7rem;
+				overflow: auto;
+				background: var(--ink);
+				color: var(--paper);
+				white-space: pre-wrap;
+			}
+			.entry code {
+				font-family: inherit;
+			}
+			.entry p {
+				margin: 0.55rem 0;
+			}
+			.entry p:first-child {
+				margin-top: 0;
+			}
+			.entry p:last-child {
+				margin-bottom: 0;
+			}
+			.entry a {
+				color: var(--blue);
+			}
+			details.tool {
+				border-top: 1px solid;
+			}
+			details.tool summary {
+				padding: 0.55rem;
+				cursor: pointer;
+				font-weight: 800;
+			}
+			.tool-output {
+				max-height: 30rem;
+				padding: 0.7rem;
+				overflow: auto;
+				border-top: 1px solid;
+				white-space: pre-wrap;
+			}
+			.provisional {
+				border-style: dashed;
+			}
+			.provisional .entry-head {
+				background: var(--blue);
+			}
+			.restore,
+			.dialog-box {
+				margin: 1rem;
+				padding: 1rem;
+				border: 3px solid var(--signal);
+				background: var(--raised);
+			}
+			.restore h2,
+			.dialog-box h2 {
+				margin: 0;
+			}
+			.ownership {
+				display: flex;
+				align-items: center;
+				gap: 0.6rem;
+				padding: 0.7rem;
+				border-bottom: 1px solid;
+			}
+			.ownership p {
+				margin: 0;
+				flex: 1;
+			}
+			.composer {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto auto;
+				background: var(--raised);
+				border-top: 1px solid;
+			}
+			.composer textarea {
+				min-height: 5rem;
+				max-height: 16rem;
+				padding: 0.8rem;
+				resize: vertical;
+				border: 0;
+				border-radius: 0;
+				background: transparent;
+			}
+			.composer .button {
+				height: 100%;
+				border-block: 0;
+				border-right: 0;
+			}
+			.composer-note {
+				grid-column: 1/-1;
+				margin: 0;
+				padding: 0.35rem 0.7rem;
+				border-top: 1px solid;
+				color: var(--muted);
+				font-size: 10px;
+			}
+			.dialog-box label {
+				display: block;
+				margin: 0.7rem 0;
+				font-weight: 800;
+			}
+			.dialog-box input,
+			.dialog-box textarea,
+			.dialog-box select {
+				width: 100%;
+				padding: 0.7rem;
+				border: 1px solid;
+				background: var(--paper);
+			}
+			.dialog-actions {
+				display: flex;
+				gap: 0.5rem;
+				margin-top: 0.7rem;
+			}
+			.live-status {
+				padding: 0.45rem 0.7rem;
+				background: var(--yellow);
+				border-bottom: 1px solid;
+				font-size: 11px;
+				font-weight: 800;
+			}
+			.unknown {
+				background: var(--signal);
+				color: white;
+			}
+			.modal {
+				width: min(32rem, calc(100% - 2rem));
+				padding: 0;
+				border: 2px solid;
+				background: var(--raised);
+				box-shadow: 0.6rem 0.6rem 0 #11120f33;
+			}
+			.modal::backdrop {
+				background: #11120faa;
+			}
+			.modal form {
+				padding: 1rem;
+			}
+			.modal h2 {
+				margin: 0 0 0.7rem;
+			}
+			.modal label {
+				display: block;
+				font-weight: 800;
+			}
+			.modal input,
+			.modal select {
+				width: 100%;
+				margin: 0.3rem 0 0.8rem;
+				padding: 0.65rem;
+				border: 1px solid;
+				background: var(--paper);
+			}
+			@media (max-width: 760px) {
+				.masthead {
+					position: static;
+				}
+				.list-head {
+					grid-template-columns: 4rem 1fr;
+				}
+				.section-code {
+					grid-row: 1/3;
+				}
+				.filters {
+					grid-column: 2;
+					border-top: 1px solid;
+					border-left: 0;
+				}
+				.list-actions {
+					grid-column: 1/-1;
+					border-top: 1px solid;
+					border-left: 0;
+				}
+				.list-actions .button {
+					flex: 1;
+				}
+				.thread-row {
+					grid-template-columns: minmax(0, 1fr) auto;
+				}
+				.thread-row .cell {
+					display: none;
+				}
+				.thread-head {
+					grid-template-columns: 4rem minmax(0, 1fr);
+				}
+				.thread-actions {
+					grid-column: 1/-1;
+					border-top: 1px solid;
+				}
+				.thread-actions .button {
+					flex: 1;
+				}
+				.status-grid {
+					grid-template-columns: repeat(2, 1fr);
+				}
+				.status-item {
+					border-bottom: 1px solid;
+				}
+				.status-grid .status-item:last-child {
+					grid-column: 1/-1;
+				}
+				.conversation {
+					padding: 0.65rem;
+				}
+				.entry[data-role] {
+					margin-inline: 0;
+				}
+				.composer {
+					position: static;
+					grid-template-columns: 1fr auto;
+				}
+				.composer .abort {
+					grid-column: 1/-1;
+					height: auto;
+					border-top: 1px solid;
+				}
+				.ownership {
+					align-items: stretch;
+					flex-direction: column;
+				}
+			}
+			@media (max-width: 390px) {
+				.shell {
+					border: 0;
+				}
+				.wordmark .eyebrow {
+					display: none;
+				}
+				.head-actions > * {
+					padding: 0.45rem;
+				}
+				.filters {
+					flex-direction: column;
+				}
+				.filters select {
+					width: 100%;
+					border-top: 1px solid;
+					border-left: 0;
+				}
+				.archive-toggle {
+					border-top: 1px solid;
+					border-left: 0;
+				}
+				.auth {
+					margin: 1rem;
+				}
+				.auth form {
+					grid-template-columns: 1fr;
+				}
+				.auth .button {
+					border-top: 1px solid;
+				}
+				.status-grid {
+					grid-template-columns: 1fr;
+				}
+				.status-grid .status-item:last-child {
+					grid-column: auto;
+				}
+				.thread-actions {
+					flex-wrap: wrap;
+				}
+				.composer {
+					grid-template-columns: 1fr;
+				}
+				.composer .button {
+					height: auto;
+					border-top: 1px solid;
+				}
+				.conversation {
+					padding: 0.4rem;
+				}
+				.entry-body,
+				.tool-output {
+					padding: 0.55rem;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<a class="skip" href="#main">Skip to threads</a>
+		<div class="shell">
+			<header class="masthead">
+				<a class="brand" href="/threads"
+					><span class="colorbar" aria-hidden="true"><i></i><i></i><i></i><i></i></span
+					><span class="wordmark"
+						><strong>Pi <span>Tower</span></strong
+						><span class="eyebrow">Managed threads</span></span
+					></a
+				>
+				<nav class="head-actions" aria-label="Account">
+					<a href="/">Legacy</a><button id="logout" class="hidden" type="button">Log out</button>
+				</nav>
+			</header>
+			<div id="notice" class="notice hidden" role="status" aria-live="polite">
+				<strong>Status</strong>
+				<p></p>
+			</div>
+			<main id="main" tabindex="-1">
+				<section id="auth" class="auth hidden">
+					<h1>Connect to Tower</h1>
+					<p>Enter the shared access token. It is exchanged for a secure session and is not stored by this page.</p>
+					<form id="login">
+						<label
+							>Access token<input
+								id="token"
+								name="token"
+								type="password"
+								required
+								autocomplete="current-password" /></label
+						><button class="button primary">Connect</button>
+					</form>
+				</section>
+				<section id="list-view" class="hidden">
+					<header class="list-head">
+						<span class="section-code">TH / 01</span>
+						<div class="title-block">
+							<span class="eyebrow">Persistent directory</span>
+							<h1>Threads</h1>
+						</div>
+						<form id="filters" class="filters">
+							<input id="search" aria-label="Search thread titles" type="search" placeholder="Search titles" /><select
+								id="runner-filter"
+								aria-label="Filter by runner"
+							>
+								<option value="">All runners</option></select
+							><label class="archive-toggle"><input id="archived" type="checkbox" /> Archived</label>
+						</form>
+						<div class="list-actions">
+							<button id="create" class="button primary" type="button">New thread</button
+							><button id="refresh-list" class="button" type="button">Refresh</button>
+						</div>
+					</header>
+					<ul id="thread-list" class="thread-list"></ul>
+					<div id="empty" class="empty hidden">
+						<h2>No threads found</h2>
+						<p>Choose an online runner to start a managed thread, or change the current filters.</p>
+					</div>
+					<button id="more" class="button load-more hidden" type="button">Load more</button>
+				</section>
+				<section id="thread-view" class="hidden">
+					<header class="thread-head">
+						<span class="section-code">TH / 02</span>
+						<div class="title-block">
+							<span id="thread-id" class="eyebrow"></span>
+							<h1 id="thread-title">Thread</h1>
+						</div>
+						<div class="thread-actions">
+							<a class="button" href="/threads">Directory</a
+							><button id="rename" class="button" type="button">Rename</button
+							><button id="archive-action" class="button" type="button">Archive</button>
+						</div>
+					</header>
+					<div class="status-grid">
+						<div class="status-item"><span class="eyebrow">Runner</span><b id="runner-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Runtime</span><b id="runtime-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Cloud sync</span><b id="sync-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Control</span><b id="owner-state">Viewer</b></div>
+						<div class="status-item"><span class="eyebrow">Checkpoint</span><b id="revision-state">—</b></div>
+					</div>
+					<div id="live-status" class="live-status hidden" role="status" aria-live="polite"></div>
+					<section id="restore" class="restore hidden">
+						<h2>Local conversation is missing</h2>
+						<p>
+							Restore the latest cloud conversation to this runner? Unsynced work may be lost. This restores
+							conversation only; files, tools, and other side effects are not reverted.
+						</p>
+						<button id="restore-button" class="button danger" type="button">Restore latest checkpoint</button>
+					</section>
+					<div class="ownership">
+						<p id="ownership-copy">Reading does not start the runner or take control.</p>
+						<button id="ownership-button" class="button" type="button">Get control</button
+						><button id="release-button" class="button hidden" type="button">Release control</button>
+					</div>
+					<div id="dialogs"></div>
+					<div id="conversation" class="conversation" aria-label="Conversation history"></div>
+					<button id="history-more" class="button load-more hidden" type="button">Load older entries</button>
+					<form id="composer" class="composer">
+						<textarea id="prompt" aria-label="Message" placeholder="Message this thread" required></textarea
+						><button id="send" class="button primary" type="submit">Send</button
+						><button id="abort" class="button danger abort" type="button">Stop</button>
+						<p id="composer-note" class="composer-note">Get control to send a message.</p>
+					</form>
+				</section>
+			</main>
+		</div>
+		<dialog id="edit-modal" class="modal">
+			<form id="edit-form">
+				<h2 id="edit-heading">New thread</h2>
+				<label id="runner-label">Runner<select id="edit-runner"></select></label
+				><label>Title (optional)<input id="edit-title" maxlength="200" /></label>
+				<div class="dialog-actions">
+					<button class="button primary" value="default">Save</button
+					><button class="button" type="button" id="edit-cancel">Cancel</button>
+				</div>
+			</form>
+		</dialog>
+		<script>
+			"use strict";
+			const $ = (id) => document.getElementById(id);
+			const state = {
+				runners: [],
+				threads: [],
+				cursor: null,
+				row: null,
+				revision: null,
+				historyCursor: null,
+				ws: null,
+				driver: false,
+				occupied: false,
+				epoch: null,
+				requestMap: new Map(),
+				lastSequence: null,
+				historyLoad: 0,
+				promptPending: false,
+				live: null,
+				reconnectTimer: null,
+				reconnects: 0,
+			};
+			const uuid = () => crypto.randomUUID();
+			function notice(message, kind = "info") {
+				const box = $("notice");
+				box.classList.toggle("hidden", !message);
+				box.dataset.kind = kind;
+				box.querySelector("p").textContent = message || "";
+			}
+			async function api(path, options = {}) {
+				const headers = new Headers(options.headers);
+				if (options.body && typeof options.body !== "string") {
+					headers.set("content-type", "application/json");
+					options.body = JSON.stringify(options.body);
+				}
+				if (options.method && options.method !== "GET") headers.set("x-pi-csrf", "1");
+				const response = await fetch(path, { ...options, headers });
+				let data = null;
+				if (response.status !== 204) {
+					const text = await response.text();
+					if (text) {
+						try {
+							data = JSON.parse(text);
+						} catch {
+							data = { message: text };
+						}
+					}
+				}
+				if (!response.ok) {
+					const error = new Error(data?.message || data?.error || `Request failed (${response.status})`);
+					error.status = response.status;
+					error.code = data?.code || data?.error;
+					error.data = data;
+					throw error;
+				}
+				return data;
+			}
+			function showAuth() {
+				$("auth").classList.remove("hidden");
+				$("list-view").classList.add("hidden");
+				$("thread-view").classList.add("hidden");
+				$("logout").classList.add("hidden");
+			}
+			function authenticated() {
+				$("auth").classList.add("hidden");
+				$("logout").classList.remove("hidden");
+			}
+			function formatDate(value) {
+				if (!value) return "—";
+				const date = new Date(value);
+				return Number.isNaN(date.valueOf())
+					? String(value)
+					: new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+			}
+			function pill(value) {
+				const span = document.createElement("span");
+				span.className = "pill";
+				span.dataset.state = String(value).toLowerCase();
+				span.textContent = String(value).replaceAll("_", " ");
+				return span;
+			}
+			async function boot() {
+				const match = location.pathname.match(/^\/threads\/([0-9a-f-]{36})\/?$/i);
+				try {
+					await loadRunners();
+					authenticated();
+					if (match) await openThread(match[1]);
+					else await loadThreads(false);
+				} catch (error) {
+					if (error.status === 401 || error.status === 403) return showAuth();
+					notice(error.message, "error");
+					authenticated();
+					match ? $("thread-view").classList.remove("hidden") : $("list-view").classList.remove("hidden");
+				}
+			}
+			async function loadRunners() {
+				state.runners = await api("/api/managed/runners");
+				for (const select of [$("runner-filter"), $("edit-runner")]) {
+					const prior = select.value;
+					while (select.options.length > (select.id === "runner-filter" ? 1 : 0))
+						select.remove(select.options.length - 1);
+					for (const runner of state.runners) {
+						const option = new Option(`${runner.id}${runner.online ? "" : " (offline)"}`, runner.id);
+						option.disabled = select.id === "edit-runner" && !runner.online;
+						select.add(option);
+					}
+					select.value = prior;
+				}
+			}
+			async function loadThreads(append) {
+				$("list-view").classList.remove("hidden");
+				$("thread-view").classList.add("hidden");
+				const params = new URLSearchParams({ archived: String($("archived").checked), limit: "50" });
+				if ($("runner-filter").value) params.set("runner", $("runner-filter").value);
+				if ($("search").value.trim()) params.set("q", $("search").value.trim());
+				if (append && state.cursor) params.set("cursor", state.cursor);
+				const data = await api(`/api/threads?${params}`);
+				state.threads = append ? [...state.threads, ...data.threads] : data.threads;
+				state.cursor = data.nextCursor;
+				renderThreads();
+			}
+			function renderThreads() {
+				const list = $("thread-list");
+				list.replaceChildren();
+				for (const row of state.threads) {
+					const li = document.createElement("li");
+					li.className = "thread-row";
+					const link = document.createElement("a");
+					link.href = `/threads/${encodeURIComponent(row.threadId)}`;
+					const title = document.createElement("span");
+					title.className = "thread-title";
+					title.textContent = row.title || "Untitled thread";
+					const id = document.createElement("span");
+					id.className = "thread-id";
+					id.textContent = row.threadId;
+					link.append(title, id);
+					li.append(
+						link,
+						cell(row.runnerId),
+						cell(formatDate(row.updatedAt)),
+						cell(pill(row.online ? row.runtime?.state || "sleeping" : "offline")),
+						cell(pill(row.runtime?.sync || "synced")),
+					);
+					const actions = document.createElement("div");
+					actions.className = "row-actions";
+					const rename = button("Rename", () => editThread(row));
+					const archive = button(row.archivedAt ? "Unarchive" : "Archive", () =>
+						patchThread(row, { archived: !row.archivedAt }),
+					);
+					actions.append(rename, archive);
+					li.append(actions);
+					list.append(li);
+				}
+				$("empty").classList.toggle("hidden", state.threads.length > 0);
+				$("more").classList.toggle("hidden", !state.cursor);
+			}
+			function cell(content) {
+				const div = document.createElement("div");
+				div.className = "cell";
+				if (content instanceof Node) div.append(content);
+				else div.textContent = content;
+				return div;
+			}
+			function button(label, handler) {
+				const b = document.createElement("button");
+				b.type = "button";
+				b.className = "button";
+				b.textContent = label;
+				b.addEventListener("click", handler);
+				return b;
+			}
+			function editThread(row = null) {
+				if (!row && !$("edit-runner").value) $("edit-runner").value = state.runners.find((runner) => runner.online)?.id || "";
+				$("edit-heading").textContent = row ? "Rename thread" : "New thread";
+				$("runner-label").classList.toggle("hidden", !!row);
+				$("edit-title").value = row?.title || "";
+				$("edit-form").dataset.threadId = row?.threadId || "";
+				$("edit-form").dataset.createKey = uuid();
+				$("edit-modal").showModal();
+				$("edit-title").focus();
+			}
+			async function saveEdit(event) {
+				event.preventDefault();
+				const threadId = event.currentTarget.dataset.threadId;
+				try {
+					if (threadId) {
+						const row =
+							state.row?.threadId === threadId ? state.row : state.threads.find((x) => x.threadId === threadId);
+						await patchThread(row, { title: $("edit-title").value.trim() });
+						$("edit-modal").close();
+						return;
+					}
+					const runnerId = $("edit-runner").value;
+					if (!runnerId) throw new Error("Choose an online runner.");
+					const row = await api("/api/threads", {
+						method: "POST",
+						body: { runnerId, title: $("edit-title").value.trim() || undefined, idempotencyKey: $("edit-form").dataset.createKey },
+					});
+					location.href = `/threads/${encodeURIComponent(row.threadId)}`;
+				} catch (error) {
+					notice(error.message, "error");
+				}
+			}
+			async function patchThread(row, changes) {
+				try {
+					const updated = await api(`/api/threads/${encodeURIComponent(row.threadId)}`, {
+						method: "PATCH",
+						body: { ...changes, metadataVersion: row.metadataVersion },
+					});
+					if (state.row?.threadId === row.threadId) {
+						state.row = { ...state.row, ...updated };
+						renderThreadState();
+					} else await loadThreads(false);
+					notice(
+						changes.archived === true
+							? "Thread archived."
+							: changes.archived === false
+								? "Thread unarchived."
+								: "Thread renamed.",
+						"success",
+					);
+				} catch (error) {
+					if (error.status === 409) notice("Thread details changed elsewhere. Reload and try again.", "error");
+					else notice(error.message, "error");
+				}
+			}
+			async function openThread(id) {
+				$("thread-view").classList.remove("hidden");
+				$("list-view").classList.add("hidden");
+				state.row = await api(`/api/threads/${encodeURIComponent(id)}`);
+				renderThreadState();
+				await loadHistory(true);
+				connect();
+				await reconcileCommands();
+			}
+			function renderThreadState() {
+				const row = state.row,
+					runtime = row.runtime || {};
+				$("thread-title").textContent = row.title || "Untitled thread";
+				document.title = `${row.title || "Untitled thread"} — Pi Tower`;
+				$("thread-id").textContent = row.threadId;
+				$("runner-state").replaceChildren(pill(row.online ? "online" : "offline"));
+				$("runtime-state").replaceChildren(pill(runtime.state || "sleeping"));
+				$("sync-state").replaceChildren(pill(runtime.sync || "synced"));
+				$("owner-state").textContent = state.driver ? "Driver" : state.occupied ? "Viewer · occupied" : "Viewer";
+				$("revision-state").textContent =
+					row.latestSnapshotRevision == null ? "None" : `${row.latestSnapshotRevision.generationId.slice(0, 8)}:${row.latestSnapshotRevision.counter}`;
+				$("archive-action").textContent = row.archivedAt ? "Unarchive" : "Archive";
+				$("restore").classList.toggle("hidden", !runtime.missingSession);
+				updateControls();
+			}
+			async function loadHistory(retry = 0) {
+				const load = ++state.historyLoad;
+				const id = encodeURIComponent(state.row.threadId),
+					revision = state.row.latestSnapshotRevision;
+				if (revision == null) {
+					$("conversation").replaceChildren();
+					state.revision = null;
+					return;
+				}
+				const entries = [];
+				let cursor = null,
+					page;
+				try {
+					do {
+						const params = new URLSearchParams({ revision: JSON.stringify(revision), limit: "100" });
+						if (cursor) params.set("cursor", cursor);
+						page = await api(`/api/threads/${id}/history?${params}`);
+						if (!page) break;
+						entries.push(...page.entries);
+						cursor = page.nextCursor;
+					} while (cursor);
+				} catch (error) {
+					if (error.status === 410 && error.code === "snapshot_expired" && retry < 3) {
+						state.row.latestSnapshotRevision = error.data?.latestRevision ?? state.row.latestSnapshotRevision;
+						notice("The displayed checkpoint expired. Reloaded the latest complete history.", "info");
+						return loadHistory(Number(retry) + 1);
+					}
+					throw error;
+				}
+				if (load !== state.historyLoad) return;
+				const conversation = $("conversation");
+				conversation.replaceChildren();
+				for (const entry of entries) conversation.append(renderEntry(entry));
+				state.revision = page?.revision ?? revision;
+				state.historyCursor = null;
+				$("history-more").classList.add("hidden");
+			}
+			function renderEntry(entry) {
+				const message = entry.message || entry;
+				const role = message.role || entry.type || "session entry";
+				const article = document.createElement("article");
+				article.className = "entry";
+				article.dataset.role = role;
+				const head = document.createElement("header");
+				head.className = "entry-head";
+				const label = document.createElement("span");
+				label.textContent = role.replaceAll("_", " ");
+				const stamp = document.createElement("span");
+				stamp.textContent = formatDate(entry.timestamp || message.timestamp);
+				head.append(label, stamp);
+				const body = document.createElement("div");
+				body.className = "entry-body";
+				if (role === "user" || role === "assistant" || role === "system") renderContent(body, message.content);
+				else if (role === "toolResult") renderTool(body, { toolName: message.toolName, status: message.isError ? "error" : "finished",
+					output: Array.isArray(message.content) ? message.content.map((part) => part.type === "text" ? part.text : JSON.stringify(part)).join("\n") : message.content });
+				else renderStructured(body, entry);
+				article.append(head, body);
+				return article;
+			}
+			function renderContent(target, content) {
+				if (Array.isArray(content)) {
+					for (const part of content) {
+						if (typeof part === "string") renderMarkdown(target, part);
+						else if (part?.type === "text") renderMarkdown(target, part.text || "");
+						else if (part?.type?.includes("tool")) renderTool(target, part);
+						else renderStructured(target, part);
+					}
+					return;
+				}
+				if (typeof content === "string") renderMarkdown(target, content);
+				else renderStructured(target, content);
+			}
+			function renderStructured(target, value) {
+				const details = document.createElement("details");
+				details.className = "tool";
+				const summary = document.createElement("summary");
+				const name = value?.name || value?.toolName || value?.type || "Additional session data";
+				summary.textContent = String(name).replaceAll("_", " ");
+				const pre = document.createElement("pre");
+				pre.className = "tool-output";
+				pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+				details.append(summary, pre);
+				target.append(details);
+			}
+			function renderTool(target, part) {
+				const details = document.createElement("details");
+				details.className = "tool";
+				const summary = document.createElement("summary");
+				summary.textContent = `${part.name || part.toolName || "Tool"} · ${part.status || part.type}`;
+				const pre = document.createElement("pre");
+				pre.className = "tool-output";
+				const output = part.result ?? part.output ?? part.arguments ?? part.input ?? "";
+				pre.textContent = typeof output === "string" ? output : JSON.stringify(output, null, 2);
+				details.append(summary, pre);
+				target.append(details);
+			}
+			function renderMarkdown(target, text) {
+				const lines = String(text).split("\n");
+				let code = false,
+					pre = null;
+				for (const line of lines) {
+					if (line.startsWith("```")) {
+						code = !code;
+						if (code) {
+							pre = document.createElement("pre");
+							const c = document.createElement("code");
+							pre.append(c);
+							target.append(pre);
+						}
+						continue;
+					}
+					if (code) {
+						pre.firstChild.append(document.createTextNode(line + "\n"));
+						continue;
+					}
+					const p = document.createElement("p");
+					appendInline(p, line);
+					target.append(p);
+				}
+			}
+			function appendInline(parent, text) {
+				const pattern = /(`[^`]+`|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*)/g;
+				let at = 0,
+					match;
+				while ((match = pattern.exec(text))) {
+					parent.append(document.createTextNode(text.slice(at, match.index)));
+					if (match[0][0] === "`") {
+						const code = document.createElement("code");
+						code.textContent = match[0].slice(1, -1);
+						parent.append(code);
+					} else if (match[2]) {
+						const a = document.createElement("a");
+						a.textContent = match[2];
+						if (safeHref(match[3])) {
+							a.href = match[3];
+							a.rel = "noopener noreferrer";
+							if (/^https?:/i.test(match[3])) a.target = "_blank";
+						}
+						parent.append(a);
+					} else {
+						const strong = document.createElement("strong");
+						strong.textContent = match[4];
+						parent.append(strong);
+					}
+					at = pattern.lastIndex;
+				}
+				parent.append(document.createTextNode(text.slice(at)));
+			}
+			function safeHref(href) {
+				try {
+					const url = new URL(href, location.href);
+					return ["http:", "https:", "mailto:"].includes(url.protocol);
+				} catch {
+					return false;
+				}
+			}
+			function connect() {
+				clearTimeout(state.reconnectTimer);
+				if (state.ws) state.ws.close();
+				const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+				const ws = new WebSocket(
+					`${scheme}//${location.host}/api/threads/${encodeURIComponent(state.row.threadId)}/stream`,
+				);
+				state.ws = ws;
+				ws.addEventListener("open", () => {
+					state.reconnects = 0;
+					state.lastSequence = null;
+					sendOperation("subscribe", { revision: state.revision });
+					setLive("Connected. Rechecking runtime state.");
+					resync("Reconnected. Reloading saved history.").then(reconcileCommands);
+				});
+				ws.addEventListener("message", (event) => {
+					try {
+						handleSocket(JSON.parse(event.data));
+					} catch {
+						resync("Received an invalid live update.");
+					}
+				});
+				ws.addEventListener("close", () => {
+					if (state.ws !== ws) return;
+					state.driver = false;
+					state.epoch = null;
+					state.promptPending = false;
+					state.requestMap.clear();
+					renderThreadState();
+					setLive("Live connection lost. Reconnecting…", "unknown");
+					const wait = Math.min(1000 * 2 ** state.reconnects++, 15000);
+					state.reconnectTimer = setTimeout(async () => {
+						try {
+							state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
+							await loadHistory(true);
+							renderThreadState();
+							await reconcileCommands();
+							connect();
+						} catch (error) {
+							notice(error.message, "error");
+							if (error.status === 401) showAuth();
+							else connect();
+						}
+					}, wait);
+				});
+				ws.addEventListener("error", () => setLive("Live connection error.", "unknown"));
+			}
+			function sendOperation(operation, payload = {}) {
+				if (state.requestMap.size >= 64) { notice("Too many pending requests; reconnect before continuing.", "error"); return null; }
+				if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+					notice("Live connection is not ready.", "error");
+					return null;
+				}
+				const requestId = uuid();
+				state.ws.send(JSON.stringify({ version: 1, requestId, operation, ...payload }));
+				state.requestMap.set(requestId, operation);
+				return requestId;
+			}
+			function handleSocket(data) {
+				if (data.type === "result") {
+					const op = state.requestMap.get(data.requestId);
+					state.requestMap.delete(data.requestId);
+					if (op === "prompt") { state.promptPending = false; updateControls(); }
+					if (data.error) {
+						notice(data.error.message || data.error, "error");
+						return;
+					}
+					if (op === "acquire" || op === "takeover") {
+						sendOperation("subscribe");
+					}
+					if (op === "subscribe") handleSocket({ type: "state", ...data.result });
+					return;
+				}
+				if (data.type === "ownership_changed") {
+					state.driver = !!data.driver;
+					state.occupied = !!data.occupied;
+					state.epoch = data.epoch;
+					renderThreadState();
+					renderDialogs(state.row.runtime?.pendingDialogs || []);
+					return;
+				}
+				if (data.type === "state") {
+					state.row = {
+						...state.row,
+						...data.thread,
+						online: data.online ?? state.row.online,
+						runtime: data.runtime || data.thread?.runtime || state.row.runtime,
+					};
+					renderThreadState();
+					renderDialogs(state.row.runtime?.pendingDialogs || []);
+					return;
+				}
+				if (data.type === "checkpoint_available") {
+					state.row.latestSnapshotRevision = data.revision;
+					state.live = null;
+					setLive("Checkpoint saved. Loading authoritative history.");
+					loadHistory(true)
+						.then(() => setLive(""))
+						.catch((error) => notice(error.message, "error"));
+					renderThreadState();
+					return;
+				}
+				if (data.type === "command_status") {
+					showReceipt(data.receipt);
+					return;
+				}
+				if (data.type === "resync_required") {
+					resync("Live updates fell behind. Reloading the saved checkpoint.");
+					return;
+				}
+				if (data.type === "error") {
+					notice(data.message || data.code || "Live operation failed.", "error");
+					return;
+				}
+				if (data.type === "pi_event") handlePiEvent(data);
+			}
+			function handlePiEvent(envelope) {
+				if (state.lastSequence != null && envelope.sequence !== state.lastSequence + 1)
+					return resync("A live update was missed. Reloading saved history.");
+				state.lastSequence = envelope.sequence;
+				const event = envelope.event || {};
+				if (event.type === "notify" || event.type === "status") {
+					setLive(event.message || event.text || event.status || "Runtime update");
+					return;
+				}
+				if (event.type === "extension_ui_request" || event.type === "ui_request") {
+					if (["notify", "setStatus"].includes(event.method)) setLive(event.message || event.statusText || "");
+					else if (["select", "confirm", "input", "editor"].includes(event.method)) renderDialogs([event]);
+					return;
+				}
+				if (event.type === "tool_execution_start" || event.type === "tool_execution_end") setLive(`${event.toolName}: ${event.type === "tool_execution_start" ? "running" : "finished"}`);
+				const delta = event.assistantMessageEvent?.type === "text_delta" ? event.assistantMessageEvent.delta : null;
+				if (typeof delta === "string") {
+					if (!state.live) {
+						state.live = document.createElement("article");
+						state.live.className = "entry provisional";
+						state.live.dataset.role = "assistant";
+						state.live.innerHTML =
+							'<header class="entry-head"><span>assistant · live</span><span>not yet saved</span></header><div class="entry-body"></div>';
+						$("conversation").append(state.live);
+					}
+					const body = state.live.querySelector(".entry-body");
+					const current = body.textContent;
+					body.textContent = (current + delta).slice(-262144);
+					setLive("Answer in progress. Live text is not yet saved.");
+				}
+			}
+			async function resync(message) {
+				setLive(message, "unknown");
+				state.lastSequence = null;
+				state.live?.remove();
+				state.live = null;
+				try {
+					state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
+					await loadHistory(true);
+					renderThreadState();
+					renderDialogs(state.row.runtime?.pendingDialogs || []);
+					setLive(["running", "waiting_input"].includes(state.row.runtime?.state) ? "Work is still running. Some live text may not be saved yet." : "");
+				} catch (error) {
+					notice(error.message, "error");
+				}
+			}
+			function setLive(message, kind = "") {
+				const el = $("live-status");
+				el.textContent = message;
+				el.className = `live-status${message ? "" : " hidden"}${kind ? " " + kind : ""}`;
+			}
+			function updateControls() {
+				if (!state.row) return;
+				const runtime = state.row.runtime || {},
+					busy = ["starting", "running", "waiting_input"].includes(runtime.state);
+				const blocked =
+					!state.driver || state.promptPending || busy || !!state.row.archivedAt || !state.row.online || runtime.sync === "error" || !["idle", "sleeping", "interrupted"].includes(runtime.state);
+				$("send").disabled = blocked;
+				$("prompt").disabled = blocked;
+				$("abort").disabled = !state.driver || !["running", "waiting_input"].includes(runtime.state);
+				$("ownership-button").classList.toggle("hidden", state.driver);
+				$("release-button").classList.toggle("hidden", !state.driver);
+				$("ownership-button").textContent = state.occupied ? "Take over" : "Get control";
+				$("ownership-button").disabled = !state.row.online || state.ws?.readyState !== WebSocket.OPEN;
+				$("ownership-copy").textContent = state.driver
+					? "You control this thread."
+					: state.occupied
+						? "Another device controls this thread. You can keep reading or take over."
+						: "Reading does not start the runner or take control.";
+				let reason = state.driver ? "Ready to send." : "Get control to send a message.";
+				if (state.row.archivedAt) reason = "Unarchive this thread to send.";
+				else if (!state.row.online) reason = "Runner is offline. Saved history remains available.";
+				else if (runtime.sync === "error") reason = "Cloud sync failed. Sending is blocked until storage recovers.";
+				else if (runtime.state === "interrupted") reason = "Previous work was interrupted and was not replayed. Review saved history before sending a new request.";
+				else if (busy) reason = "This thread is busy. Stop it or wait before sending again.";
+				$("composer-note").textContent = reason;
+			}
+			function renderDialogs(dialogs) {
+				const root = $("dialogs");
+				root.replaceChildren();
+				for (const dialog of dialogs) {
+					const method = dialog.method;
+					const box = document.createElement("section");
+					box.className = "dialog-box";
+					const heading = document.createElement("h2");
+					heading.textContent = dialog.title || "Runner needs input";
+					const text = document.createElement("p");
+					text.textContent = dialog.message || dialog.prompt || "";
+					const form = document.createElement("form");
+					let control;
+					if (method === "select") {
+						control = document.createElement("select");
+						for (const option of dialog.options || [])
+							control.add(
+								new Option(
+									typeof option === "string" ? option : option.label,
+									typeof option === "string" ? option : option.value,
+								),
+							);
+					} else if (method === "confirm") {
+						control = document.createElement("select");
+						control.add(new Option("Confirm", "true"));
+						control.add(new Option("Cancel", "false"));
+					} else {
+						control = document.createElement(
+							method === "editor" ? "textarea" : "input",
+						);
+						control.value = dialog.prefill || "";
+					}
+					control.disabled = !state.driver;
+					control.setAttribute("aria-label", dialog.title || "Response");
+					const send = button("Send response", () => submitDialog(dialog, control));
+					form.addEventListener("submit", (event) => { event.preventDefault(); if (state.driver) submitDialog(dialog, control); });
+					send.disabled = !state.driver;
+					form.append(control, send);
+					box.append(heading, text, form);
+					root.append(box);
+				}
+			}
+			function submitDialog(dialog, control) {
+				let value = control.value;
+				if (dialog.method === "confirm") value = value === "true";
+				const commandId = uuid();
+				rememberCommand(commandId);
+				sendOperation("extension_ui_response", {
+					commandId,
+					epoch: state.epoch,
+					targetRunId: state.row.runtime?.runId,
+					dialogId: dialog.dialogId || dialog.id,
+					value,
+				});
+			}
+			function rememberCommand(id) {
+				const key = `pi-tower:commands:${state.row.threadId}`;
+				const ids = JSON.parse(sessionStorage.getItem(key) || "[]")
+					.filter((x) => typeof x === "string");
+				ids.push(id);
+				sessionStorage.setItem(key, JSON.stringify(ids));
+			}
+			async function reconcileCommands() {
+				const key = `pi-tower:commands:${state.row.threadId}`;
+				const ids = JSON.parse(sessionStorage.getItem(key) || "[]").filter((x) => typeof x === "string");
+				for (const id of ids) {
+					try {
+						const receipt = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}/commands/${encodeURIComponent(id)}`);
+						showReceipt(receipt || { commandId: id, status: "unknown" });
+					} catch (error) {
+						if (error.status === 404)
+							setLive(
+								`Command ${id} has unknown status. Review saved history before deciding whether to try again.`,
+								"unknown",
+							);
+					}
+				}
+			}
+			function showReceipt(receipt) {
+				if (!receipt) return;
+				const id = receipt.commandId;
+				if (["settled", "aborted", "rejected"].includes(receipt.status) && id) {
+					const key = `pi-tower:commands:${state.row.threadId}`;
+					sessionStorage.setItem(
+						key,
+						JSON.stringify(JSON.parse(sessionStorage.getItem(key) || "[]").filter((x) => x !== id)),
+					);
+				}
+				if (receipt.status === "unknown")
+					setLive(`Command ${id || ""} may or may not have run. It will not be retried automatically.`, "unknown");
+				else setLive(`Command ${receipt.status || "updated"}.`);
+			}
+			$("login").addEventListener("submit", async (event) => {
+				event.preventDefault();
+				const body = new URLSearchParams({ token: $("token").value });
+				try {
+					const response = await fetch("/api/session", {
+						method: "POST",
+						headers: { "content-type": "application/x-www-form-urlencoded", "x-pi-csrf": "1" },
+						body,
+					});
+					if (!response.ok || new URL(response.url).searchParams.get("auth") === "failed") throw new Error("The access token was not accepted.");
+					$("token").value = "";
+					location.href = location.pathname;
+				} catch (error) {
+					notice(error.message || "Could not connect to Tower.", "error");
+				}
+			});
+			$("logout").addEventListener("click", async () => {
+				try {
+					await api("/api/logout", { method: "POST" });
+				} finally {
+					location.href = "/threads";
+				}
+			});
+			$("filters").addEventListener("submit", (event) => event.preventDefault());
+			let searchTimer;
+			$("search").addEventListener("input", () => {
+				clearTimeout(searchTimer);
+				searchTimer = setTimeout(() => loadThreads(false).catch((error) => notice(error.message, "error")), 250);
+			});
+			$("runner-filter").addEventListener("change", () =>
+				loadThreads(false).catch((error) => notice(error.message, "error")),
+			);
+			$("archived").addEventListener("change", () =>
+				loadThreads(false).catch((error) => notice(error.message, "error")),
+			);
+			$("refresh-list").addEventListener("click", () =>
+				loadThreads(false).catch((error) => notice(error.message, "error")),
+			);
+			$("more").addEventListener("click", () => loadThreads(true).catch((error) => notice(error.message, "error")));
+			$("create").addEventListener("click", () => editThread());
+			$("edit-form").addEventListener("submit", saveEdit);
+			$("edit-cancel").addEventListener("click", () => $("edit-modal").close());
+			$("rename").addEventListener("click", () => editThread(state.row));
+			$("archive-action").addEventListener("click", () => patchThread(state.row, { archived: !state.row.archivedAt }));
+			$("history-more").addEventListener("click", () =>
+				loadHistory(false).catch((error) => notice(error.message, "error")),
+			);
+			$("ownership-button").addEventListener("click", () => {
+				if (state.occupied) {
+					if (
+						!confirm(
+							"Take control from the other device? Its controls will be disabled, but the current run will continue.",
+						)
+					)
+						return;
+					sendOperation("takeover", { confirmed: true });
+				} else sendOperation("acquire");
+			});
+			$("release-button").addEventListener("click", () => sendOperation("release"));
+			$("composer").addEventListener("submit", (event) => {
+				event.preventDefault();
+				const message = $("prompt").value;
+				if (!message.trim() || $("send").disabled) return;
+				if (new TextEncoder().encode(message).length > 256 * 1024 || message.trimStart().startsWith("/")) { notice("Use plain text up to 256 KiB; slash commands are not supported.", "error"); return; }
+				const commandId = uuid();
+				rememberCommand(commandId);
+				if (!sendOperation("prompt", { commandId, epoch: state.epoch, message })) return;
+				state.promptPending = true;
+				$("prompt").value = "";
+				setLive("Command received locally. Waiting for Tower acknowledgment.");
+				updateControls();
+			});
+			$("abort").addEventListener("click", () => {
+				const runId = state.row.runtime?.runId;
+				if (!runId) return;
+				const commandId = uuid();
+				rememberCommand(commandId);
+				sendOperation("abort", { commandId, epoch: state.epoch, targetRunId: runId });
+			});
+			$("restore-button").addEventListener("click", async () => {
+				const revision = state.row.latestSnapshotRevision;
+				if (
+					!confirm(
+						"Restore only the latest saved conversation? Unsynced work may be lost, and files or tool side effects will not be reverted.",
+					)
+				)
+					return;
+				try {
+					await api(`/api/threads/${encodeURIComponent(state.row.threadId)}/restore`, {
+						method: "POST",
+						body: { expectedRevision: revision, confirmed: true },
+					});
+					notice("Restore requested.", "success");
+				} catch (error) {
+					if (error.status === 409) {
+						notice("A newer checkpoint is available. Reload the thread and confirm again.", "error");
+						state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
+						renderThreadState();
+						await loadHistory(true);
+					} else notice(error.message, "error");
+				}
+			});
+			window.addEventListener("pagehide", () => {
+				clearTimeout(state.reconnectTimer);
+				state.ws?.close();
+			});
+			boot();
+		</script>
+	</body>
+</html>
