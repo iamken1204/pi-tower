@@ -29,6 +29,7 @@
 		"runner.mjs",
 		"task.mjs",
 		"lib.mjs",
+		"managed-*.mjs",
 		"extension.ts",
 		"ui.html",
 		"skills",
@@ -36,13 +37,15 @@
 		"LICENSE"
 	],
 	"scripts": {
-		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs",
+		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs && node test/compat/verify-pi.mjs && node test/compat/verify-crash.mjs && node test/verify-managed.mjs",
+		"verify:phase0": "node test/compat/verify-isolated.mjs",
 		"prepublishOnly": "npm run verify"
 	},
 	"engines": {
-		"node": ">=22"
+		"node": ">=22.22.0"
 	},
 	"dependencies": {
+		"better-sqlite3": "13.0.3",
 		"ws": "^8.18.0"
 	},
 	"peerDependencies": {

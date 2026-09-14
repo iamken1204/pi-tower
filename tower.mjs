@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 import { readTokenFile } from "./lib.mjs";
+import { createManagedTower } from "./managed-tower.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const UI_HTML = readFileSync(new URL("./ui.html", import.meta.url));
@@ -18,9 +19,15 @@ function parseArgs(argv) {
 		token: process.env.PI_TOWER_TOKEN,
 		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
 		idleTtl: process.env.PI_TOWER_IDLE_TTL ?? "30m",
+		dataDir: process.env.PI_TOWER_DATA_DIR,
 	};
 	for (let i = 0; i < argv.length; i++) {
-		if (argv[i] === "--port") opts.port = Number(argv[++i]);
+		if (argv[i] === "--help") {
+			console.log("pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]\n--data-dir <path> enables the managed catalog (or PI_TOWER_DATA_DIR).");
+			process.exit(0);
+		}
+		else if (argv[i] === "--port") opts.port = Number(argv[++i]);
+		else if (argv[i] === "--data-dir") opts.dataDir = argv[++i];
 		else if (argv[i] === "--token") {
 			opts.token = argv[++i];
 			opts.tokenFile = undefined;
@@ -54,7 +61,8 @@ function parseArgs(argv) {
 	return opts;
 }
 
-export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000 }) {
+export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir }) {
+	const managed = dataDir ? createManagedTower(dataDir) : null;
 	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
@@ -117,6 +125,12 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
+		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/"))) {
+			// Phase 1 is Bearer-only; cookie writes require phase-3 CSRF and ownership.
+			if (!bearerAuthorized(req)) { res.writeHead(401).end(); return; }
+			void managed.http(req, res, url);
+			return;
+		}
 		if (url.pathname === "/healthz") {
 			res.end("pi-tower");
 			return;
@@ -209,8 +223,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		res.writeHead(404).end();
 	});
 
-	const wss = new WebSocketServer({ noServer: true });
-	const routes = { "/runner": handleControl, "/runner-session": handleSession, "/attach": handleAttach };
+	const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+	const routes = { "/runner": handleControl, "/runner-session": handleSession, "/attach": handleAttach, ...managed?.routes };
 
 	server.on("upgrade", (req, socket, head) => {
 		const url = new URL(req.url, "http://x");
@@ -243,7 +257,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		}
 		for (const res of uiStreams) res.write(": heartbeat\n\n");
 	}, 30000);
-	server.on("close", () => clearInterval(heartbeat));
+	server.on("close", () => { clearInterval(heartbeat); managed?.close(); });
 
 	function failPending(key, code, reason) {
 		const p = pending.get(key);
@@ -345,6 +359,10 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	function handleAttach(ws, params) {
 		const id = params.get("runner");
 		const name = params.get("session") ?? "main";
+		if (managed?.isManagedSession(name)) {
+			ws.close(1008, "managed_namespace");
+			return;
+		}
 		if (!NAME_RE.test(name)) {
 			ws.close(1008, "invalid session name");
 			return;
@@ -406,8 +424,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-	const { port, token, idleTtlMs } = parseArgs(process.argv.slice(2));
-	createTower({ token, idleTtlMs }).listen(port, () => console.log(`pi-tower listening on :${port}`));
+	const { port, token, idleTtlMs, dataDir } = parseArgs(process.argv.slice(2));
+	createTower({ token, idleTtlMs, dataDir }).listen(port, () => console.log(`pi-tower listening on :${port}`));
 	// As container PID 1, node has no default signal dispositions, so docker stop would otherwise hang 10s to SIGKILL.
 	for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(0));
 }

@@ -1,9 +1,11 @@
-FROM node:22-alpine
+FROM node:22.22.0-alpine
 WORKDIR /app
 COPY package.json package-lock.json ./
-# tower needs only ws; typebox/jiti serve the extension and tests
+# Native SQLite falls back to a local build when no matching prebuild is available.
+RUN apk add --no-cache --virtual .build-deps python3 make g++
 RUN npm ci --omit=dev --omit=peer
-COPY tower.mjs ./
+RUN apk del .build-deps
+COPY tower.mjs lib.mjs managed-tower.mjs managed-storage.mjs ./
 COPY ui.html ./
 USER node
 EXPOSE 9000

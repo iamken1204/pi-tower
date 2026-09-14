@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { readTokenFile } from "./lib.mjs";
+import { ManagedRunner } from "./managed-runner.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -13,10 +14,20 @@ function parseArgs(argv) {
 		token: process.env.PI_TOWER_TOKEN,
 		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
 		piArgs: [],
+		dataDir: process.env.PI_RUNNER_DATA_DIR,
 	};
 	for (let i = 0; i < argv.length; i++) {
-		if (argv[i] === "--hq") opts.hq = argv[++i];
+		if (argv[i] === "--help") {
+			console.log("pi-runner --hq <ws(s)://host> [--id name] [--token t | --token-file path] [-- <pi args>]\nManaged: --managed-threads --data-dir <path> [--pi-package <npm package directory>]\n--managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_RUNNER_DATA_DIR supplies --data-dir. Managed mode rejects passthrough pi args.");
+			process.exit(0);
+		}
+		else if (argv[i] === "--hq") opts.hq = argv[++i];
 		else if (argv[i] === "--id") opts.id = argv[++i];
+		else if (argv[i] === "--managed-threads") opts.managed = true;
+		else if (argv[i] === "--data-dir") opts.dataDir = argv[++i];
+		else if (argv[i] === "--pi-package") opts.piPackage = argv[++i];
+		else if (argv[i] === "--managed-idle-ms") opts.idleTtlMs = Number(argv[++i]);
+		else if (argv[i] === "--managed-max-awake") opts.maxAwake = Number(argv[++i]);
 		else if (argv[i] === "--token") {
 			opts.token = argv[++i];
 			opts.tokenFile = undefined;
@@ -45,10 +56,16 @@ function parseArgs(argv) {
 		console.error("missing --hq or token (--token / --token-file / PI_TOWER_TOKEN / PI_TOWER_TOKEN_FILE)");
 		process.exit(1);
 	}
+	if (opts.managed && (!opts.dataDir || opts.piArgs.length)) throw new Error("managed mode requires --data-dir and rejects passthrough pi args; configure pi through its settings");
+	if (opts.idleTtlMs !== undefined && (!Number.isSafeInteger(opts.idleTtlMs) || opts.idleTtlMs < 0)) throw new Error("invalid managed idle TTL");
+	if (opts.maxAwake !== undefined && (!Number.isSafeInteger(opts.maxAwake) || opts.maxAwake < 1)) throw new Error("invalid awake limit");
 	return opts;
 }
 
-const { hq, id, token, piArgs } = parseArgs(process.argv.slice(2));
+const options = parseArgs(process.argv.slice(2));
+const { hq, id, token, piArgs } = options;
+const managed = options.managed ? new ManagedRunner(options) : null;
+managed?.connect({ hq, token });
 // { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
 const wsOpts = { headers: { authorization: `Bearer ${token}` } };
 
@@ -57,14 +74,16 @@ let control = null;
 
 // Keep idle children alive so detaching and reattaching preserves session context.
 function ensureSession(name) {
+	if (managed?.threads.has(name)) return;
 	let entry = children.get(name);
 	if (!entry) {
 		const child = spawn("pi", ["--mode", "rpc", ...piArgs], { stdio: ["pipe", "pipe", "inherit"] });
 		entry = { child, buf: "", ws: null };
 		children.set(name, entry);
 		// LF-only framing per pi docs/rpc.md; readline is not protocol-compliant
+		child.stdout.setEncoding("utf8");
 		child.stdout.on("data", (chunk) => {
-			entry.buf += chunk.toString("utf8");
+			entry.buf += chunk;
 			let nl;
 			while ((nl = entry.buf.indexOf("\n")) !== -1) {
 				let line = entry.buf.slice(0, nl);
@@ -127,9 +146,13 @@ function connect() {
 }
 connect();
 
+let stopping = false;
 for (const sig of ["SIGINT", "SIGTERM"]) {
-	process.on(sig, () => {
+	process.on(sig, async () => {
+		if (stopping) return;
+		stopping = true;
 		for (const { child } of children.values()) child.kill(sig);
-		process.exit(0);
+		try { await managed?.close(); process.exit(0); }
+		catch (error) { console.error(error.message); process.exit(1); }
 	});
 }

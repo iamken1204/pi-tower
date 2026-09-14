@@ -41,6 +41,8 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
+Requires Node.js 22.22.0 or newer. Compatibility checks passed with pi 0.85.1 on Node 22.22.0 and 26.8.2; older pi versions have not been established as supported. Cloud Threads is under development and is not yet a production-ready feature.
+
 Three roles, each runnable on any machine (even all three on one box); the runner and interactive sides also need `pi` installed.
 
 **Tower** (any host the runner and interactive sides can both reach)
@@ -144,7 +146,23 @@ Single shared token, sent as an Authorization header on every upgrade and HTTP r
 ## Verify
 
 ```sh
-npm run verify
+npm run verify:phase0 # all checks in a disposable workspace with an empty pi profile
 ```
 
-Four assert-based scripts: tower relay semantics (fake runner), full chain through a real `pi --mode rpc` (no LLM call), the extension's tools plus the `pi-task` CLI driven against a fake runner, and pi-package loading via `pi -e .` (extension flag registered, skill listed).
+The four legacy scripts cover relay semantics, a real no-LLM RPC chain, extension/CLI behavior and package loading. Additional probes cover full-tree SDK restoration, UTF-8 framing, wrapper crashes and managed thread persistence. Real pi tests use scripted providers and isolated credentials; `PI_COMPAT_PACKAGE` can specify the installed pi package directory.
+
+## Experimental managed threads
+
+Enable the phase-1 programmatic interface explicitly:
+
+```sh
+pi-tower --data-dir /persistent/tower --token-file /path/to/token
+pi-runner --hq wss://tower.example.com --id workstation --token-file /path/to/token \
+  --managed-threads --data-dir /persistent/runner
+```
+
+Run the wrapper from the workspace used for new threads. Existing threads retain their original cwd across restarts. Managed mode currently requires pi 0.85.1; `--pi-package /absolute/package/directory` overrides global npm discovery. Configure models and extensions through normal pi settings; managed mode rejects passthrough pi arguments, including session/continue/no-session overrides.
+
+`--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies only after the driver releases or disconnects and the run has settled, not while tools or dialogs are active. A crashed wrapper leaves a durable writer lock and refuses automatic restart: do not delete that lock based only on PID absence. Copying runner data to another host is unsupported.
+
+The current client transport is Bearer-only and separate from legacy `/attach`. It does not yet provide cloud history, durable command deduplication or browser takeover. Do not deploy it as completed Cloud Threads v1.
