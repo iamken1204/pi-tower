@@ -41,7 +41,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
-Requires Node.js 22.22.0 or newer. Compatibility checks passed with pi 0.85.1 on Node 22.22.0 and 26.8.2; older pi versions have not been established as supported. Cloud Threads is under development and is not yet a production-ready feature.
+Requires Node.js 22.22.0 or newer. Compatibility checks passed with pi 0.85.1 on Node 22.22.0 and 26.8.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
 
 Three roles, each runnable on any machine (even all three on one box); the runner and interactive sides also need `pi` installed.
 
@@ -151,9 +151,9 @@ npm run verify:phase0 # all checks in a disposable workspace with an empty pi pr
 
 The four legacy scripts cover relay semantics, a real no-LLM RPC chain, extension/CLI behavior and package loading. Additional probes cover full-tree SDK restoration, UTF-8 framing, wrapper crashes and managed thread persistence. Real pi tests use scripted providers and isolated credentials; `PI_COMPAT_PACKAGE` can specify the installed pi package directory.
 
-## Experimental managed threads
+## Cloud Threads (opt-in)
 
-Enable the phase-1 programmatic interface explicitly:
+Cloud Threads adds a persistent thread catalog, cloud history, command receipts, and a browser chat interface. Enable the Tower catalog and managed runner explicitly:
 
 ```sh
 pi-tower --data-dir /persistent/tower --token-file /path/to/token
@@ -161,8 +161,45 @@ pi-runner --hq wss://tower.example.com --id workstation --token-file /path/to/to
   --managed-threads --data-dir /persistent/runner
 ```
 
-Run the wrapper from the workspace used for new threads. Existing threads retain their original cwd across restarts. Managed mode currently requires pi 0.85.1; `--pi-package /absolute/package/directory` overrides global npm discovery. Configure models and extensions through normal pi settings; managed mode rejects passthrough pi arguments, including session/continue/no-session overrides.
+After signing in at `https://tower.example.com/`, open `https://tower.example.com/threads/`. The same shared token grants access to every thread and runner. Use HTTPS/WSS outside a trusted local network.
 
-`--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies only after the driver releases or disconnects and the run has settled, not while tools or dialogs are active. A crashed wrapper leaves a durable writer lock and refuses automatic restart: do not delete that lock based only on PID absence. Copying runner data to another host is unsupported.
+Run the wrapper from the workspace used for new threads. Existing threads retain that cwd across restarts and always execute on the same runner host. Do not clone or copy a runner data directory to another host; Cloud Threads does not migrate the repo, working tree, credentials, or tool side effects. Managed mode currently accepts pi 0.85.1; this is the tested version, not a minimum inferred from package discovery. `--pi-package /absolute/package/directory` overrides global npm discovery. Configure models and extensions through normal pi settings. Managed mode rejects passthrough pi arguments, including session, continue, and no-session overrides. Legacy sessions and the commands above remain unchanged when managed mode is disabled.
 
-The current client transport is Bearer-only and separate from legacy `/attach`. It does not yet provide cloud history, durable command deduplication or browser takeover. Do not deploy it as completed Cloud Threads v1.
+`--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies only after the driver releases or disconnects and the run has settled, not while tools or dialogs are active. The wrapper and each pi child hold separate OS-backed SQLite locks. Restart refuses to open a second writer while an old child holds its lock. After confirmed exit, it validates the local checkpoint and complete appended entries, marks the run interrupted, and never replays uncertain commands. Never delete lock files based on PID absence or age. Use local filesystems, not network shares.
+
+Tower limits default to a 256 KiB prompt or dialog response, 512 KiB managed WebSocket frame, 64 MiB snapshot, 1 GiB retained snapshot BLOB quota, 256 MiB minimum free disk, two concurrent uploads, and a 1 MiB slow-viewer buffer. Thread lists default to 50 rows (maximum 100); history defaults to 100 entries (maximum 1000). Set Tower limits with the variables in `.env.example`. Set `PI_MANAGED_TEXT_BYTES` on both Tower and runner. If raising the snapshot limit, also set the runner's download ceiling `PI_RUNNER_MAX_SNAPSHOT_BYTES` (default 67108864). Frame limits apply to serialized JSON, including escaping and metadata.
+
+`GET /api/managed/usage` reports retained BLOB, database, WAL and free-space bytes. Every successful snapshot transaction prunes older BLOBs only after verifying their entries survive unchanged in the new full snapshot. Revision/hash indexes and command receipts remain. The quota counts retained BLOBs after pruning; reserve additional disk for old/new overlap, WAL and backups. SQLite reuses freed pages but does not necessarily shrink its main file. WAL autocheckpoint runs at 1000 pages; Tower also requests a passive checkpoint every 60 seconds. Avoid external long-lived read transactions that prevent checkpoint progress. Sync/storage errors disable new prompts on the affected thread; stopping and reading remain available.
+
+Basic RPC select/confirm/input/editor dialogs and text notifications are supported. Custom TUI widgets, arbitrary slash commands and uploads are not. `settled` means the run stopped and a local checkpoint was saved, not that every tool succeeded or external side effects were undone. Cloud sync is a separate status. Unknown commands are never automatically retried; inspect saved history before explicitly sending a new command.
+
+### Docker storage and backup
+
+The Compose deployment enables managed Tower storage at `/data` on the `tower-data` volume. Its web interface is available at `https://<tunnel-hostname>/threads/`. Runner data is separate and must remain on each runner host; start each managed runner with its own persistent `PI_RUNNER_DATA_DIR` or `--data-dir`.
+
+Snapshots can contain prompts, tool output, source code, and secrets. They are not end-to-end encrypted. Restrict and encrypt the Tower volume and backups, rotate the shared token if it leaks, and back up each runner's data and workspace separately. Losing the Tower volume loses cloud history; losing runner data or its workspace cannot be repaired by moving a Tower backup to a different runner.
+
+Make a consistent backup only while Tower is stopped. This archive retains the catalog, snapshots, and command receipts, including receipts for pruned snapshot revisions:
+
+```sh
+mkdir -p backups
+docker compose stop tower
+docker compose run --rm --no-deps --user 0 -v "$PWD/backups:/backup" tower \
+  sh -c 'tar -C /data -czf /backup/pi-tower-data.tgz .'
+docker compose start tower
+```
+
+Restore into the same deployment and then check SQLite before starting Tower. Keep Tower stopped throughout the restore. The command below saves a second archive of the current volume before replacing it; retain that archive until the restored data has been checked:
+
+```sh
+docker compose stop tower
+docker compose run --rm --no-deps --user 0 -v "$PWD/backups:/backup" tower sh -c \
+  'tar -C /data -czf /backup/pre-restore-$(date +%s).tgz . && find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar -C /data -xzf /backup/pi-tower-data.tgz && node --input-type=module -e '\''import Database from "better-sqlite3"; import {createSnapshotStore} from "./managed-snapshots.mjs"; const db=new Database("/data/tower.sqlite",{readonly:true}); if(db.pragma("integrity_check",{simple:true})!=="ok") throw new Error("integrity_check failed"); const snapshots=createSnapshotStore(db); for(const row of db.prepare("SELECT thread_id FROM managed_snapshot_latest").all()) snapshots.latest(row.thread_id); db.close()'\'''
+docker compose start tower
+```
+
+Do not copy only `tower.sqlite` from a running Tower: committed data may still be in `tower.sqlite-wal`. Test restores on disposable storage and confirm expected threads, history, and receipts before relying on a backup.
+
+On reconnect, the original runner reconciles receipts and cloud revision/hash before accepting work. It can republish a verified local superset after Tower rolls back to an older backup, using a fresh random generation. Divergent history fails closed. Threads created after that backup are absent from its catalog: the runner retains them locally and logs `thread_missing_from_catalog`, without recreating metadata or blocking other threads. Recover a newer Tower backup to make those threads available again. If both sides lost newer records, backups cannot prove or recover the missing side effects or receipts.
+
+The full Docker product image and container-volume recovery remain unverified. See [implementation evidence and remaining acceptance work](docs/cloud-threads-progress.md); do not treat the current work as completed Cloud Threads v1.
