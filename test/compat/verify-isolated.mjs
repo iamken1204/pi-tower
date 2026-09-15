@@ -10,7 +10,7 @@ const temp = mkdtempSync(resolve(tmpdir(), "pi-tower-regression-"));
 try {
 	for (const dir of ["home", "agent", "workspace"]) mkdirSync(resolve(temp, dir));
 	const cwd = resolve(temp, "workspace");
-	for (const file of ["runner.mjs", "tower.mjs", "task.mjs", "lib.mjs", "managed-storage.mjs", "managed-pi.mjs", "managed-runner.mjs", "managed-tower.mjs", "managed-snapshots.mjs", "managed-journal.mjs", "managed-lock.mjs", "extension.ts", "ui.html", "threads.html", "package.json", "skills", "test"])
+	for (const file of ["runner.mjs", "tower.mjs", "task.mjs", "lib.mjs", "managed-storage.mjs", "managed-pi.mjs", "managed-runner.mjs", "managed-interactive.mjs", "managed-tower.mjs", "managed-snapshots.mjs", "managed-journal.mjs", "managed-lock.mjs", "extension.ts", "ui.html", "threads.html", "package.json", "skills", "test"])
 		cpSync(resolve(root, file), resolve(cwd, file), { recursive: true });
 	symlinkSync(resolve(root, "node_modules"), resolve(cwd, "node_modules"), "dir");
 	const env = { PATH: `${dirname(process.execPath)}:${process.env.PATH}`, HOME: resolve(temp, "home"),

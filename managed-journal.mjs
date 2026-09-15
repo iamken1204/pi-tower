@@ -9,10 +9,14 @@ if (!Number.isSafeInteger(textLimit) || textLimit < 1) throw new Error("invalid_
 export function commandPayload(input) {
 	if (!["prompt", "abort", "extension_ui_response"].includes(input.operation)) throw new Error("invalid_command");
 	if (input.operation === "prompt" && (typeof input.message !== "string" || !input.message.trim() || input.message.trimStart().startsWith("/") || Buffer.byteLength(input.message) > textLimit)) throw new Error("invalid_command");
+	if (input.operation === "prompt" && input.behavior !== undefined && !["followUp", "steer"].includes(input.behavior)) throw new Error("invalid_command");
 	if (input.operation !== "prompt") uuid(input.targetRunId);
 	if (input.operation === "extension_ui_response" && (typeof input.dialogId !== "string" || !["boolean", "string"].includes(typeof input.value) || Buffer.byteLength(String(input.value)) > textLimit)) throw new Error("invalid_command");
-	return { operation: input.operation, message: input.message ?? null, targetRunId: input.targetRunId ?? null,
+	const payload = { operation: input.operation, message: input.message ?? null, targetRunId: input.targetRunId ?? null,
 		dialogId: input.dialogId ?? null, value: input.value ?? null };
+	// Absence is the legacy durable representation and means followUp on dispatch.
+	if (input.operation === "prompt" && input.behavior !== undefined) payload.behavior = input.behavior;
+	return payload;
 }
 export const payloadHash = (payload) => createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 

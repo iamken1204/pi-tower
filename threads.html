@@ -498,26 +498,30 @@
 				background: var(--blue);
 			}
 			.restore,
-			.dialog-box {
+			.dialog-box,
+			.queue-box {
 				margin: 1rem;
 				padding: 1rem;
 				border: 3px solid var(--signal);
 				background: var(--raised);
 			}
 			.restore h2,
-			.dialog-box h2 {
+			.dialog-box h2,
+			.queue-box h2 {
 				margin: 0;
 			}
-			.ownership {
-				display: flex;
-				align-items: center;
-				gap: 0.6rem;
-				padding: 0.7rem;
-				border-bottom: 1px solid;
+			.queue-box {
+				border-color: var(--blue);
 			}
-			.ownership p {
-				margin: 0;
-				flex: 1;
+			.queue-box ol {
+				margin-bottom: 0;
+				padding-left: 1.5rem;
+			}
+			.queue-box li span {
+				color: var(--muted);
+				font-size: 10px;
+				font-weight: 800;
+				text-transform: uppercase;
 			}
 			.composer {
 				display: grid;
@@ -667,10 +671,6 @@
 					height: auto;
 					border-top: 1px solid;
 				}
-				.ownership {
-					align-items: stretch;
-					flex-direction: column;
-				}
 			}
 			@media (max-width: 390px) {
 				.shell {
@@ -807,7 +807,6 @@
 						<div class="status-item"><span class="eyebrow">Runner</span><b id="runner-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Runtime</span><b id="runtime-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Cloud sync</span><b id="sync-state">—</b></div>
-						<div class="status-item"><span class="eyebrow">Control</span><b id="owner-state">Viewer</b></div>
 						<div class="status-item"><span class="eyebrow">Checkpoint</span><b id="revision-state">—</b></div>
 					</div>
 					<div id="live-status" class="live-status hidden" role="status" aria-live="polite"></div>
@@ -819,19 +818,16 @@
 						</p>
 						<button id="restore-button" class="button danger" type="button">Restore latest checkpoint</button>
 					</section>
-					<div class="ownership">
-						<p id="ownership-copy">Reading does not start the runner or take control.</p>
-						<button id="ownership-button" class="button" type="button">Get control</button
-						><button id="release-button" class="button hidden" type="button">Release control</button>
-					</div>
 					<div id="dialogs"></div>
+					<div id="queue"></div>
 					<div id="conversation" class="conversation" aria-label="Conversation history"></div>
 					<button id="history-more" class="button load-more hidden" type="button">Load older entries</button>
 					<form id="composer" class="composer">
 						<textarea id="prompt" aria-label="Message" placeholder="Message this thread" required></textarea
 						><button id="send" class="button primary" type="submit">Send</button
+						><button id="steer" class="button hidden" type="button">Steer current run</button
 						><button id="abort" class="button danger abort" type="button">Stop</button>
-						<p id="composer-note" class="composer-note">Get control to send a message.</p>
+						<p id="composer-note" class="composer-note">Connecting to runner…</p>
 					</form>
 				</section>
 			</main>
@@ -858,8 +854,6 @@
 				revision: null,
 				historyCursor: null,
 				ws: null,
-				driver: false,
-				occupied: false,
 				epoch: null,
 				requestMap: new Map(),
 				lastSequence: null,
@@ -1091,11 +1085,11 @@
 				$("runner-state").replaceChildren(pill(row.online ? "online" : "offline"));
 				$("runtime-state").replaceChildren(pill(runtime.state || "sleeping"));
 				$("sync-state").replaceChildren(pill(runtime.sync || "synced"));
-				$("owner-state").textContent = state.driver ? "Driver" : state.occupied ? "Viewer · occupied" : "Viewer";
 				$("revision-state").textContent =
 					row.latestSnapshotRevision == null ? "None" : `${row.latestSnapshotRevision.generationId.slice(0, 8)}:${row.latestSnapshotRevision.counter}`;
 				$("archive-action").textContent = row.archivedAt ? "Unarchive" : "Archive";
 				$("restore").classList.toggle("hidden", !runtime.missingSession);
+				renderQueue(runtime.queue || []);
 				updateControls();
 			}
 			async function loadHistory(retry = 0) {
@@ -1278,7 +1272,6 @@
 				});
 				ws.addEventListener("close", () => {
 					if (state.ws !== ws) return;
-					state.driver = false;
 					state.epoch = null;
 					state.promptPending = false;
 					state.requestMap.clear();
@@ -1321,15 +1314,10 @@
 						notice(data.error.message || data.error, "error");
 						return;
 					}
-					if (op === "acquire" || op === "takeover") {
-						sendOperation("subscribe");
-					}
 					if (op === "subscribe") handleSocket({ type: "state", ...data.result });
 					return;
 				}
-				if (data.type === "ownership_changed") {
-					state.driver = !!data.driver;
-					state.occupied = !!data.occupied;
+				if (data.type === "access_changed") {
 					state.epoch = data.epoch;
 					renderThreadState();
 					renderDialogs(state.row.runtime?.pendingDialogs || []);
@@ -1425,27 +1413,43 @@
 				if (!state.row) return;
 				const runtime = state.row.runtime || {},
 					busy = ["starting", "running", "waiting_input"].includes(runtime.state);
-				const blocked =
-					!state.driver || state.promptPending || busy || !!state.row.archivedAt || !state.row.online || runtime.sync === "error" || !["idle", "sleeping", "interrupted"].includes(runtime.state);
+				const connected = state.ws?.readyState === WebSocket.OPEN;
+				const blocked = !connected || state.epoch == null || state.promptPending || !!state.row.archivedAt ||
+					!state.row.online || runtime.sync === "error" || runtime.inputReady === false || (busy && !runtime.queueSupported);
 				$("send").disabled = blocked;
-				$("prompt").disabled = blocked;
-				$("abort").disabled = !state.driver || !["running", "waiting_input"].includes(runtime.state);
-				$("ownership-button").classList.toggle("hidden", state.driver);
-				$("release-button").classList.toggle("hidden", !state.driver);
-				$("ownership-button").textContent = state.occupied ? "Take over" : "Get control";
-				$("ownership-button").disabled = !state.row.online || state.ws?.readyState !== WebSocket.OPEN;
-				$("ownership-copy").textContent = state.driver
-					? "You control this thread."
-					: state.occupied
-						? "Another device controls this thread. You can keep reading or take over."
-						: "Reading does not start the runner or take control.";
-				let reason = state.driver ? "Ready to send." : "Get control to send a message.";
+				$("prompt").disabled = !!state.row.archivedAt;
+				$("steer").classList.toggle("hidden", !["running", "waiting_input"].includes(runtime.state));
+				$("steer").disabled = blocked || !["running", "waiting_input"].includes(runtime.state);
+				$("send").textContent = busy ? "Send follow-up" : "Send";
+				$("abort").disabled = !connected || state.epoch == null || !["running", "waiting_input"].includes(runtime.state);
+				let reason = busy ? "Send a follow-up for later, or steer the current run." : "Ready to send.";
 				if (state.row.archivedAt) reason = "Unarchive this thread to send.";
 				else if (!state.row.online) reason = "Runner is offline. Saved history remains available.";
 				else if (runtime.sync === "error") reason = "Cloud sync failed. Sending is blocked until storage recovers.";
-				else if (runtime.state === "interrupted") reason = "Previous work was interrupted and was not replayed. Review saved history before sending a new request.";
-				else if (busy) reason = "This thread is busy. Stop it or wait before sending again.";
+				else if (runtime.inputReady === false) reason = "This runtime cannot accept browser input.";
+				else if (busy && !runtime.queueSupported) reason = "Background RPC is busy. Use an interactive runner for queued input.";
+				else if (!connected || state.epoch == null) reason = "Connecting to runner…";
+				else if (state.promptPending) reason = "Waiting for Tower to admit the previous message.";
 				$("composer-note").textContent = reason;
+			}
+			function renderQueue(queue) {
+				const root = $("queue");
+				root.replaceChildren();
+				if (!queue.length) return;
+				const box = document.createElement("section");
+				box.className = "queue-box";
+				const heading = document.createElement("h2");
+				heading.textContent = "Queued messages";
+				const list = document.createElement("ol");
+				for (const item of queue) {
+					const row = document.createElement("li");
+					const behavior = document.createElement("span");
+					behavior.textContent = item.behavior === "steer" ? "steering" : "follow-up";
+					row.append(document.createTextNode(`${item.message || ""} `), behavior);
+					list.append(row);
+				}
+				box.append(heading, list);
+				root.append(box);
 			}
 			function renderDialogs(dialogs) {
 				const root = $("dialogs");
@@ -1458,6 +1462,12 @@
 					heading.textContent = dialog.title || "Runner needs input";
 					const text = document.createElement("p");
 					text.textContent = dialog.message || dialog.prompt || "";
+					if (method === "editor" || dialog.localOnly) {
+						text.textContent = "Complete this editor in the local terminal";
+						box.append(heading, text);
+						root.append(box);
+						continue;
+					}
 					const form = document.createElement("form");
 					let control;
 					if (method === "select") {
@@ -1479,17 +1489,17 @@
 						);
 						control.value = dialog.prefill || "";
 					}
-					control.disabled = !state.driver;
 					control.setAttribute("aria-label", dialog.title || "Response");
 					const send = button("Send response", () => submitDialog(dialog, control));
-					form.addEventListener("submit", (event) => { event.preventDefault(); if (state.driver) submitDialog(dialog, control); });
-					send.disabled = !state.driver;
+					control.disabled = send.disabled = !state.row.online || state.epoch == null || state.ws?.readyState !== WebSocket.OPEN;
+					form.addEventListener("submit", (event) => { event.preventDefault(); submitDialog(dialog, control); });
 					form.append(control, send);
 					box.append(heading, text, form);
 					root.append(box);
 				}
 			}
 			function submitDialog(dialog, control) {
+				if (control.disabled) return;
 				let value = control.value;
 				if (dialog.method === "confirm") value = value === "true";
 				const commandId = uuid();
@@ -1586,31 +1596,20 @@
 			$("history-more").addEventListener("click", () =>
 				loadHistory(false).catch((error) => notice(error.message, "error")),
 			);
-			$("ownership-button").addEventListener("click", () => {
-				if (state.occupied) {
-					if (
-						!confirm(
-							"Take control from the other device? Its controls will be disabled, but the current run will continue.",
-						)
-					)
-						return;
-					sendOperation("takeover", { confirmed: true });
-				} else sendOperation("acquire");
-			});
-			$("release-button").addEventListener("click", () => sendOperation("release"));
-			$("composer").addEventListener("submit", (event) => {
-				event.preventDefault();
+			function submitPrompt(behavior = "followUp") {
 				const message = $("prompt").value;
 				if (!message.trim() || $("send").disabled) return;
 				if (new TextEncoder().encode(message).length > 256 * 1024 || message.trimStart().startsWith("/")) { notice("Use plain text up to 256 KiB; slash commands are not supported.", "error"); return; }
 				const commandId = uuid();
 				rememberCommand(commandId);
-				if (!sendOperation("prompt", { commandId, epoch: state.epoch, message })) return;
+				if (!sendOperation("prompt", { commandId, epoch: state.epoch, message, behavior })) return;
 				state.promptPending = true;
 				$("prompt").value = "";
 				setLive("Command received locally. Waiting for Tower acknowledgment.");
 				updateControls();
-			});
+			}
+			$("composer").addEventListener("submit", (event) => { event.preventDefault(); submitPrompt(); });
+			$("steer").addEventListener("click", () => submitPrompt("steer"));
 			$("abort").addEventListener("click", () => {
 				const runId = state.row.runtime?.runId;
 				if (!runId) return;

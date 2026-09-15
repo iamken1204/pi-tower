@@ -64,6 +64,27 @@ try {
 	const normal = new Socket(); normal.bufferedAmount = 1024;
 	tower.routes["/managed/client"](normal, new URLSearchParams({ thread: threadId }));
 	assert.equal(normal.frames[0].type, "state");
+	const catalog = new Database(resolve(dir, "tower.sqlite"));
+	const expected = [];
+	for (let i = 0; i < 23; i++) {
+		const id = randomUUID(), archived = i % 5 === 0;
+		catalog.prepare("INSERT INTO threads(threadId,createKey,runnerId,runnerInstanceId,title,createTitle,createdAt,updatedAt,archivedAt) VALUES(?,?,?,?,?,?,?,?,?)")
+			.run(id, randomUUID(), "fixture", instanceId, "pagination", "pagination", "2026-09-15", "2026-09-15", archived ? "2026-09-15" : null);
+		if (!archived) expected.push(id);
+	}
+	catalog.close();
+	const found = [];
+	let cursor = null;
+	do {
+		const page = call(`/api/threads?q=pagination&runner=fixture&limit=7${cursor ? `&cursor=${cursor}` : ""}`, "GET", {}, null); await page.done;
+		assert.equal(page.res.status, 200);
+		found.push(...page.res.body.threads.map((row) => row.threadId));
+		cursor = page.res.body.nextCursor;
+	} while (cursor);
+	assert.deepEqual(found, expected.sort().reverse(), "tied timestamps paginate without duplicate or omitted threads and exclude archives");
+	const archivedPage = call("/api/threads?q=pagination&archived=true", "GET", {}, null); await archivedPage.done;
+	assert.equal(archivedPage.res.body.threads.length, 5);
+	console.log("ok catalog: filtered keyset pagination across tied timestamps and archived rows");
 	tower.close();
 	headers = open({ minFreeBytes: Number.MAX_SAFE_INTEGER });
 	const low = call(path, "PUT", headers, "{}"); await low.done;

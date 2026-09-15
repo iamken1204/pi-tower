@@ -1,14 +1,22 @@
 # Cloud Threads 實作與驗證紀錄
 
-第 1～3 階段的主要路徑已實作，第 4 階段容器驗證已通過，仍待其餘驗收矩陣收尾；**尚不宣稱 v1 完成**。依據 [v1 規格](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。使用者已授權接續各階段及本機 commit，未授權 push、部署或發布。
+已實作本機原生 pi TUI 與網頁共用 thread，並完成下列回歸、容器與瀏覽器驗證。依據 [v1 規格開頭的互動模式修訂](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。未 push、部署或發布；未測範圍列在文末，不把實測環境外的行為算成通過。
 
-## 本機互動式 pi：新目標與第一組實測
+## 本機互動式 pi：交付方式與實測
 
-使用者已改為本機原生 TUI 與網頁共用同一 thread，取消所有手動控制權流程，不要求 orb 行為，並排除 extension editor 的網頁回答。最新契約見規格開頭的互動模式修訂。下文的 ownership 與 browser-first 描述記錄舊實作，不是新目標已完成的證據。
+`pi-runner --interactive --data-dir <本機資料目錄>` 在終端執行公開 SDK 的 `InteractiveMode`。本機 thread 自動出現在 Tower，所有已登入的瀏覽器直接送訊息，不必取得或釋放操作權。忙碌時預設排入 follow-up，也能 steering 或停止；TUI 狀態列與網頁顯示佇列。恢復既有 thread 加上 `--thread <UUID>`，原生 thread 不會因網頁送訊息而自動啟動另一個 runtime。各終端使用不同 runner ID 與資料目錄。
+
+單一程序持有 session writer。公開 `session.prompt` 外層在 pi 非同步 preflight 前保留執行位置，本機與遠端輸入共用順序；停止會清除佇列，已取消或結果不明的命令不從歷史文字猜成 settled，也不重播。成功回傳並保存 checkpoint 才更新收據。`select`／`confirm`／`input` 用公開 UI context 與 AbortSignal 讓第一個有效答案關閉另一個提示；editor 保留本機介面，網頁只能顯示提示。
+
+`/reload` 重新安裝 UI bridge，`/new` 註冊新 thread 並停用舊 thread 的網頁輸入。Tower 僅在本次 inventory 確認包含該 thread 時，讓 runner 清除首次註冊意圖。已註冊 thread 若不在較舊 Tower 備份中，仍保留本機資料並停止同步，不重建可能遺失的標題／封存狀態。
 
 `node test/compat/verify-interactive.mjs` 使用獨立 tmux server、隔離 HOME／pi profile／workspace 與 faux provider，在真實 pi 0.85.1、Node 26.8.2 通過：終端先輸入、公開 SDK 遠端輸入顯示在同一原生 TUI、執行中遠端 follow-up 確實進入佇列、遠端回答 confirm 後本機 dialog 關閉且可繼續輸入，以及遠端 transport 關閉後本機仍收到新回答。沒有付費 LLM 呼叫或私有 API。
 
-這是 SDK／TUI 相容性測試，遠端入口使用本機 Unix socket，不是正式 Tower 或瀏覽器測試。尚待整合本機 thread 註冊、全端命令收據／排序、取消 driver 機制、網頁佇列，以及 `/reload`／session 切換後的 bridge 重建；select／input、雙端同時輸入與同時回答也尚未由此測試證明。不得把這個 probe 當成可供使用者啟動的 managed 互動模式。
+上述 probe 另保留作為 SDK 相容性證據。產品測試為 `npm run verify:native`，已在 Node 22.22.0／26.8.2、真實 pi 0.85.1 通過：本機與兩個 WebSocket client 共用 session、preflight 期間排隊、steering、停止清除佇列、三種跨端 dialog、拒絕第二次回答、editor 拒絕遠端回答、Tower 離線期間本機繼續、舊 epoch 失效、`/reload`、`/new`，以及 SIGKILL 後從不同啟動目錄還原同一 entries／leaf，再於原 cwd 續接。測試使用隔離 HOME／profile／workspace 與 faux provider，不讀取真實憑證或呼叫付費模型。
+
+`--managed-threads` 的背景 RPC 路徑保留，沒有原生 TUI，忙碌時不收新 prompt；網頁依 runtime capability 停用送出。這條相容路徑不提供本機互動體驗，新的入口必須使用 `--interactive`。
+
+Native 測試也驗證未啟動模型回合的 custom entry 會同步，以及切回較早的 assistant leaf 後，crash 重啟仍保留後面的完整分支。Tree、compaction 與 session info 事件立即保存；沒有事件的 extension append 每 5 秒檢查一次 checkpoint hash，內容未變就不重寫檔案。
 
 ## 持久化與還原契約
 
@@ -22,9 +30,9 @@ Wrapper 持有 `writer.sqlite` 獨占交易；每個 child 在讀 session 前持
 
 Crash 復原保留已驗證 checkpoint 與完整 append suffix；若沒有新增 entry，沿用獨立保存的 leaf。有新增 entry 時，驗證舊 entries 是完整前綴，再以最後 append 的 entry 作為復原 leaf。壞行、未完成尾行、錯誤 parent／leaf 或不同前綴一律拒絕，不丟棄資料。未完成命令標示 unknown／interrupted，不重播。
 
-## Revision 與 ownership 不沿用舊操作權
+## Revision 與連線 epoch 不沿用舊授權
 
-Revision 採 `{generationId, counter}`。Runner 每次啟動取得隨機 generation；每次新快照先持久保存 bytes 與 counter，舊 outbox 仍用原本版本。跨 generation 以 predecessor revision/hash 串接，不比較 UUID 或 timestamp。Ownership 採 `{incarnation, connectionId, bootId, counter}`：Tower 重啟與 runner 重連都換發不從備份載入的隨機身分，先對帳收據與 inventory，再開放命令。這是 CSPRNG 的低碰撞機率保證，不是數學上的零碰撞。
+Revision 採 `{generationId, counter}`。Runner 每次啟動取得隨機 generation；每次新快照先持久保存 bytes 與 counter，舊 outbox 仍用原本版本。跨 generation 以 predecessor revision/hash 串接，不比較 UUID 或 timestamp。連線 epoch 採 `{incarnation, connectionId, bootId, counter}`，同一 thread 的瀏覽器共用 epoch，不再代表某個裝置持有操作權。Tower 重啟與 runner 重連都換發不從備份載入的隨機身分，先對帳收據與 inventory，再開放命令。Runner 確認的 epoch 必須完整相符。這是 CSPRNG 的低碰撞機率保證，不是數學上的零碰撞。
 
 Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本機完整涵蓋雲端與 pending entries，才以新 generation 補傳。本機資料不會被雲端覆寫；舊 outbox 另存 `reconciled-*.json` 作為證據。分歧就停用寫入。備份後才建立、雲端目錄已不存在的 thread 保留在 runner，停止同步並記錄 `thread_missing_from_catalog`，其他 thread 仍可對帳。需較新的 Tower 備份才能恢復那些目錄項目，不自動匯入。
 
@@ -54,6 +62,10 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 ## 瀏覽器驗證
 
+本機互動模式使用 `PI_NATIVE_PREVIEW=1 npm run verify:native`。已在真實瀏覽器登入 fixture，送出 confirm prompt、等待時再送 follow-up、從網頁回答確認，檢查本機 TUI 顯示排隊訊息與後續回答。桌機 1280 px 與手機 390 px 的截圖已用 view_media 檢查，沒有操作權按鈕，dialog、佇列與 composer 不互相遮蔽。證據：`assets/cloud-threads-native-desktop.png`、`assets/cloud-threads-native-mobile.png`。關閉瀏覽器後，以 fixture 印出的 stop URL 清除測試程序與資料。
+
+下列為背景 RPC 路徑先前的 smoke test 紀錄；其中的手動接手操作已由自動共享 epoch 取代。
+
 啟動 `node test/compat/browser-fixture.mjs`，使用它印出的 URL 與一次性 fixture token。兩個獨立瀏覽器 session 登入同一 thread，其中一個設為 390 × 844。送出 `smoke-write`，faux provider 會要求**真實 pi bash 工具**在隔離 cwd 寫出 `smoke.txt`；`smoke-check` 讀取同一個檔案與 cwd，`dialog` 產生 pending confirm。
 
 已操作並檢查：建立與多輪輸入、手機／桌機接手、舊裝置停止與 dialog 控制停用、接手後回答原 dialog、Tower 重啟重連、runner 離線仍讀歷史且不能輸入、runner 重啟後再次讀到測試檔案。Fixture 的控制 URL 接受 POST `/restart-tower`、`/runner-offline`、`/runner-online`；結束時 POST `/stop` 清除隔離資料。不要把這些控制路由當成產品 API。
@@ -70,11 +82,11 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 測試自行清除專用容器、image、volumes 與隔離目錄，不自動啟動 Docker engine，也不加入預設回歸套件。OrbStack 與隨其啟動的三個既有 VictoriaLogs 容器保持運作，沒有修改其設定或資料。
 
-## 尚未完成的驗收
+## 驗證範圍與限制
 
 - A11 已涵蓋上述 7 個 runner 命令邊界；尚未逐一注入 Tower 每個 SQL／網路回覆邊界，以及兩份備份同時退回後的延遲 abort／dialog 訊息。
 - A18／A26 已涵蓋可設定大小／配額邊界、SQLite FULL、鎖定及 fake slow viewer；尚未跑預設 64 MiB／1 GiB 規模、真實慢速網路及 runner fsync 的 ENOSPC／EIO 注入。
-- A22 的 metadata／搜尋／封存已測；大量清單多頁翻動與同時更新的完整組合尚未測。
+- A22 的 metadata／搜尋／封存已測；另以真實 SQLite 與 fake transport 驗證 23 筆同時間戳記、7 筆一頁的搜尋／runner 篩選，完整走完分頁，不重複、不遺漏並排除封存項目。尚未窮舉翻頁期間所有 metadata 更新組合。
 - 真實 provider 的重試／自動壓縮長流程、Windows／其他檔案系統與實體手機 Safari 尚未驗證。這些結果不能從 faux provider 或桌面窄視窗推論。
 
-產品範圍沒有新的待確認事項；剩餘工作是驗證與依結果修正。部署、容量、停止後備份與最新快照還原限制見 [README](../README.md)。規格的完成定義照舊，不能因上述測試通過就把 A01～A27 全部標成完成。
+產品範圍沒有新的待確認事項。部署、容量、停止後備份與最新快照還原限制見 [README](../README.md)。本機互動模式已可手動驗證；以上壓力測試與故障注入尚未涵蓋的組合不算驗收通過，不宣稱所有環境與故障時序皆已驗證。

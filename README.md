@@ -153,25 +153,33 @@ The four legacy scripts cover relay semantics, a real no-LLM RPC chain, extensio
 
 ## Cloud Threads (opt-in)
 
-Cloud Threads adds a persistent thread catalog, cloud history, command receipts, and a browser chat interface. Enable the Tower catalog and managed runner explicitly:
+Cloud Threads connects a native local pi terminal to browser input, with a persistent catalog, saved history and command receipts. Start the runner from your workspace in a terminal:
 
 ```sh
 pi-tower --data-dir /persistent/tower --token-file /path/to/token
 pi-runner --hq wss://tower.example.com --id workstation --token-file /path/to/token \
-  --managed-threads --data-dir /persistent/runner
+  --interactive --data-dir /persistent/runner
 ```
 
 After signing in at `https://tower.example.com/`, open `https://tower.example.com/threads/`. The same shared token grants access to every thread and runner. Use HTTPS/WSS outside a trusted local network.
 
+The local thread appears automatically. Send from the terminal or any authenticated browser without acquiring or releasing control. Browser input during a run queues a follow-up; **Steer current run** uses pi steering. **Stop** cancels the run and pending queue. Closing the browser does not stop pi. When Tower is disconnected, the local terminal continues and uploads progress after reconnecting.
+
+Exit pi normally, then add `--thread <UUID from the thread URL>` to the same command to resume it. This restores the original workspace, full session tree and saved active leaf. `/new` creates another managed thread; `/reload` preserves the connection bridge. An inactive native thread cannot start itself from the web: resume it in a local terminal. Each running terminal needs its own runner ID and data directory. Copying runner data between hosts is unsupported. There is no orb or replacement runtime.
+
+`--managed-threads` without `--interactive` retains the older background RPC mode for browser-created threads. It has no native terminal and accepts prompts only while idle. Legacy relay commands are unchanged.
+
 Run the wrapper from the workspace used for new threads. Existing threads retain that cwd across restarts and always execute on the same runner host. Do not clone or copy a runner data directory to another host; Cloud Threads does not migrate the repo, working tree, credentials, or tool side effects. Managed mode currently accepts pi 0.85.1; this is the tested version, not a minimum inferred from package discovery. `--pi-package /absolute/package/directory` overrides global npm discovery. Configure models and extensions through normal pi settings. Managed mode rejects passthrough pi arguments, including session, continue, and no-session overrides. Legacy sessions and the commands above remain unchanged when managed mode is disabled.
 
-`--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies only after the driver releases or disconnects and the run has settled, not while tools or dialogs are active. The wrapper and each pi child hold separate OS-backed SQLite locks. Restart refuses to open a second writer while an old child holds its lock. After confirmed exit, it validates the local checkpoint and complete appended entries, marks the run interrupted, and never replays uncertain commands. Never delete lock files based on PID absence or age. Use local filesystems, not network shares.
+For background RPC mode, `--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies after all viewers disconnect and the run settles, not while tools or dialogs are active. Interactive mode does not idle-sleep. The wrapper and each pi child hold separate OS-backed SQLite locks; interactive pi runs inside the wrapper process. Restart refuses to open a second writer while an old writer holds its lock. After confirmed exit, it validates the local checkpoint and complete appended entries, marks the run interrupted, and never replays uncertain commands. Never delete lock files based on PID absence or age. Use local filesystems, not network shares.
 
 Tower limits default to a 256 KiB prompt or dialog response, 512 KiB managed WebSocket frame, 64 MiB snapshot, 1 GiB retained snapshot BLOB quota, 256 MiB minimum free disk, two concurrent uploads, and a 1 MiB slow-viewer buffer. Thread lists default to 50 rows (maximum 100); history defaults to 100 entries (maximum 1000). Set Tower limits with the variables in `.env.example`. Set `PI_MANAGED_TEXT_BYTES` on both Tower and runner. If raising the snapshot limit, also set the runner's download ceiling `PI_RUNNER_MAX_SNAPSHOT_BYTES` (default 67108864). Frame limits apply to serialized JSON, including escaping and metadata.
 
 `GET /api/managed/usage` reports retained BLOB, database, WAL and free-space bytes. Every successful snapshot transaction prunes older BLOBs only after verifying their entries survive unchanged in the new full snapshot. Revision/hash indexes and command receipts remain. The quota counts retained BLOBs after pruning; reserve additional disk for old/new overlap, WAL and backups. SQLite reuses freed pages but does not necessarily shrink its main file. WAL autocheckpoint runs at 1000 pages; Tower also requests a passive checkpoint every 60 seconds. Avoid external long-lived read transactions that prevent checkpoint progress. Sync/storage errors disable new prompts on the affected thread; stopping and reading remain available.
 
-Basic RPC select/confirm/input/editor dialogs and text notifications are supported. Custom TUI widgets, arbitrary slash commands and uploads are not. `settled` means the run stopped and a local checkpoint was saved, not that every tool succeeded or external side effects were undone. Cloud sync is a separate status. Unknown commands are never automatically retried; inspect saved history before explicitly sending a new command.
+Native extension select/confirm/input dialogs can be answered from either interface; the first answer closes the other prompt. Extension editor dialogs stay local, with a browser notice to use the terminal. Custom TUI widgets, browser slash commands and uploads are not supported. `settled` means the run stopped and a local checkpoint was saved, not that every tool succeeded or external side effects were undone. Cloud sync is a separate status. Unknown commands are never automatically retried; inspect saved history before explicitly sending a new command.
+
+Run `npm run verify:phase0` for isolated regression tests, and `npm run verify:native` for the actual Tower + native pi + two WebSocket clients test (requires tmux). Both use isolated profiles and no paid LLM calls. Set `PI_NATIVE_PREVIEW=1` for the native test to keep its browser fixture open; it prints a local stop URL that cleans up its test data.
 
 ### Docker storage and backup
 

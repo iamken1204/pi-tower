@@ -52,8 +52,8 @@ export function createManagedTower(dataDir, {
 		if (["received", "dispatching", "accepted"].includes(receipt.status)) db.prepare("UPDATE managed_commands SET receipt=? WHERE threadId=? AND commandId=?").run(JSON.stringify({ ...receipt, status: "unknown" }), row.threadId, row.commandId);
 	}
 	const runners = new Map();
-	const clients = new Map(); // thread -> read-only subscribers, including its current driver
-	const owners = new Map();
+	const clients = new Map();
+	const accesses = new Map(); // One runner-installed epoch shared by every attached browser.
 	const metadataChanging = new Set();
 	const restores = new Map();
 	const incarnation = randomUUID(); // Never restored from SQLite or a backup.
@@ -75,32 +75,31 @@ export function createManagedTower(dataDir, {
 	const broadcast = (threadId, value) => {
 		for (const client of clients.get(threadId) ?? []) send(client, value);
 	};
-	function ownershipChanged(threadId) {
-		const owner = owners.get(threadId);
-		for (const client of clients.get(threadId) ?? []) send(client, { type: "ownership_changed", threadId,
-			driver: owner?.ws === client && owner.confirmed, occupied: !!owner?.ws,
-			epoch: owner?.ws === client && owner.confirmed ? owner.epoch : null });
+	function accessChanged(threadId, epoch = accesses.get(threadId)?.epoch ?? null) {
+		broadcast(threadId, { type: "access_changed", threadId, epoch });
 	}
-	function requireDriver(row, ws, epoch) {
-		const owner = owners.get(row.threadId);
-		if (!owner?.confirmed || owner.ws !== ws || JSON.stringify(epoch) !== JSON.stringify(owner.epoch)) throw new Error("stale_ownership");
+	function requireAccess(row, epoch) {
+		const access = accesses.get(row.threadId);
+		if (!access?.epoch || JSON.stringify(epoch) !== JSON.stringify(access.epoch)) throw new Error("stale_access");
 	}
-	async function ownership(row, ws, operation, confirmed) {
-		const old = owners.get(row.threadId);
-		if (operation === "acquire" && old?.ws && old.ws !== ws) throw new Error("driver_occupied");
-		if (operation === "takeover" && confirmed !== true) throw new Error("takeover_confirmation_required");
-		if (operation === "release" && old?.ws !== ws) return;
+	function ensureAccess(row) {
 		const runner = runners.get(row.runnerId);
 		if (!runner?.ready) throw new Error("runner_offline");
-		const owner = { ws: operation === "release" ? null : ws, confirmed: false,
-			epoch: { incarnation, connectionId: runner.connectionId, bootId: runner.bootId, counter: ++epochCounter } };
-		owners.set(row.threadId, owner); // Revoke first; no browser may write until the runner acknowledges.
-		ownershipChanged(row.threadId);
-		await request(row, "ownership", { epoch: owner.epoch, driver: !!owner.ws });
-		if (owners.get(row.threadId) !== owner || (owner.ws && owner.ws.readyState !== 1)) throw new Error("ownership_superseded");
-		owner.confirmed = true;
-		ownershipChanged(row.threadId);
-		return { driver: !!owner.ws, epoch: owner.ws ? owner.epoch : null };
+		void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
+		const old = accesses.get(row.threadId);
+		if (old?.epoch && old.connectionId === runner.connectionId) return Promise.resolve(old.epoch);
+		if (old?.pending && old.connectionId === runner.connectionId) return old.pending;
+		const access = { connectionId: runner.connectionId, epoch: null };
+		const epoch = { incarnation, connectionId: runner.connectionId, bootId: runner.bootId, counter: ++epochCounter };
+		access.pending = request(row, "access", { epoch })
+			.then((result) => {
+				if (accesses.get(row.threadId) !== access || !runner.ready || runners.get(row.runnerId) !== runner) throw new Error("access_superseded");
+				if (JSON.stringify(result?.epoch) !== JSON.stringify(epoch)) throw new Error("invalid_access_ack");
+				access.epoch = epoch;
+				access.pending = null; accessChanged(row.threadId); return access.epoch;
+			}).catch((error) => { if (accesses.get(row.threadId) === access) accesses.delete(row.threadId); throw error; });
+		accesses.set(row.threadId, access);
+		return access.pending;
 	}
 	function saveReceipt(threadId, receipt) {
 		uuid(receipt.commandId);
@@ -174,6 +173,13 @@ export function createManagedTower(dataDir, {
 					runner.inventory = [];
 					runner.orphans = new Set();
 					for (const item of message.threads) {
+						if (item.registration && !db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(uuid(item.threadId))) {
+							const { createKey, title, createdAt } = item.registration;
+							uuid(createKey); uuid(item.piSessionId); uuid(item.workspaceId);
+							if (typeof title !== "string" || title.length > 200 || typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) throw new Error("invalid_registration");
+							db.prepare("INSERT INTO threads (threadId,createKey,runnerId,runnerInstanceId,title,createTitle,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?)")
+								.run(item.threadId, createKey, id, instanceId, title, title, createdAt, createdAt);
+						}
 						if (!db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(uuid(item.threadId))) {
 							runner.orphans.add(item.threadId);
 							console.error(JSON.stringify({ event: "thread_missing_from_catalog", threadId: item.threadId, runnerId: id }));
@@ -191,6 +197,7 @@ export function createManagedTower(dataDir, {
 					runner.ready = true;
 					send(ws, { type: "inventory_confirmed", connectionId: runner.connectionId, quarantined: [...runner.orphans], heads: runner.inventory.map((item) => ({ threadId: item.threadId, head: snapshots.head(item.threadId) })) });
 					for (const item of runner.inventory) broadcast(item.threadId, { type: "state", thread: describe(thread(item.threadId)), runtime: item, online: true });
+					for (const item of runner.inventory) if (clients.has(item.threadId)) void ensureAccess(thread(item.threadId)).catch(() => {});
 				} else if (message.type === "command_status" || message.type === "runtime_state") {
 					if (runner.orphans?.has(message.threadId)) return;
 					const row = thread(message.threadId);
@@ -216,7 +223,7 @@ export function createManagedTower(dataDir, {
 			runners.delete(id);
 			for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("runner_disconnected_unknown")); }
 			for (const threadId of clients.keys()) if (thread(threadId).runnerId === id) {
-				owners.delete(threadId); ownershipChanged(threadId);
+				accesses.delete(threadId); accessChanged(threadId);
 				broadcast(threadId, { type: "resync_required", threadId, runner: "offline" });
 			}
 		});
@@ -227,18 +234,16 @@ export function createManagedTower(dataDir, {
 		if (!clients.has(row.threadId)) clients.set(row.threadId, new Set());
 		clients.get(row.threadId).add(ws);
 		send(ws, { type: "state", thread: describe(row), runtime: liveStates.get(row.threadId), online: !!runners.get(row.runnerId)?.ready });
-		ownershipChanged(row.threadId);
+		if (runners.get(row.runnerId)?.ready) void ensureAccess(row).then((epoch) => send(ws, { type: "access_changed", epoch })).catch(() => send(ws, { type: "access_changed", epoch: null }));
 		ws.on("message", async (bytes) => {
 			let message;
 			try {
 				message = JSON.parse(bytes.toString());
 				row = thread(row.threadId);
-				if (message.version !== 1 || !["subscribe", "acquire", "takeover", "state", "entries", "prompt", "abort", "extension_ui_response", "command", "sleep", "release"].includes(message.operation)) throw new Error("invalid_command");
+				if (message.version !== 1 || !["subscribe", "state", "entries", "prompt", "abort", "extension_ui_response", "command", "sleep"].includes(message.operation)) throw new Error("invalid_command");
 				uuid(message.requestId);
-				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireDriver(row, ws, message.epoch);
-				const result = ["acquire", "takeover", "release"].includes(message.operation)
-					? await ownership(row, ws, message.operation, message.confirmed)
-					: message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!runners.get(row.runnerId)?.ready }
+				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
+				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!runners.get(row.runnerId)?.ready }
 					: ["prompt", "abort", "extension_ui_response"].includes(message.operation)
 					? await execute(row, message)
 					: message.operation === "command" ? command(row.threadId, message.commandId)
@@ -249,7 +254,7 @@ export function createManagedTower(dataDir, {
 		ws.on("close", () => {
 			clients.get(row.threadId)?.delete(ws);
 			if (!clients.get(row.threadId)?.size) clients.delete(row.threadId);
-			void ownership(row, ws, "release").catch(() => {}); // A disconnected runner also revokes its lease.
+			if (runners.get(row.runnerId)?.ready) void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
 		});
 	}
 	async function http(req, res, url) {
@@ -289,6 +294,12 @@ export function createManagedTower(dataDir, {
 					if (restores.has(row.threadId)) throw new Error("restore_in_progress");
 					requireDiskSpace();
 					const ack = snapshots.commit(Buffer.concat(chunks), row);
+					if (!row.title) {
+						const first = snapshots.latest(row.threadId).envelope.entries.find((entry) => entry.message?.role === "user");
+						const content = first?.message?.content;
+						const title = (typeof content === "string" ? content : Array.isArray(content) ? content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join(" ") : "").trim().slice(0, 80);
+						if (title) db.prepare("UPDATE threads SET title=? WHERE threadId=? AND title=''").run(title, row.threadId);
+					}
 					res.end(JSON.stringify(ack));
 					broadcast(row.threadId, { type: "checkpoint_available", threadId: row.threadId, ...ack });
 				} finally { uploads--; }

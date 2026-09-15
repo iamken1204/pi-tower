@@ -40,7 +40,7 @@ async function attach(id) {
 	const ws = new WebSocket(`ws://127.0.0.1:${port}/managed/client?thread=${id}`, { headers: { authorization: `Bearer ${token}` } });
 	client = ws;
 	const frames = []; let epoch;
-	ws.on("message", (data) => { const frame = JSON.parse(data); frames.push(frame); if (frame.type === "ownership_changed") epoch = frame.epoch; });
+	ws.on("message", (data) => { const frame = JSON.parse(data); frames.push(frame); if (frame.type === "access_changed") epoch = frame.epoch; });
 	await once(ws, "open");
 	const request = async (operation, fields = {}) => {
 		const requestId = randomUUID();
@@ -48,7 +48,7 @@ async function attach(id) {
 		const reply = await until(() => frames.find((frame) => frame.requestId === requestId), operation);
 		assert.equal(reply.error, undefined, JSON.stringify(reply)); return reply.result;
 	};
-	await request("acquire"); return request;
+	await until(() => epoch, "automatic access"); return request;
 }
 try {
 	docker("info");

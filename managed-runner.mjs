@@ -77,7 +77,8 @@ export class ManagedRunner {
 	}
 
 	inventory() {
-		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs }) => ({ threadId: record.threadId, workspaceId: record.workspaceId,
+		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId,
+			registration: record.registration, inputReady: record.interactive ? !!native : undefined, queueSupported: !!native, queue: native?.queue() ?? [],
 			piSessionId: record.piSessionId, state, runId: activeCommand ?? null, pendingDialogs: [...dialogs.values()],
 			missingSession: !existsSync(record.sessionFile),
 			sync: syncError ? "error" : cloudCheck || sync.pending || !sync.ack ? "pending" : "synced", latestRevision: sync.ack?.revision ?? null }));
@@ -236,8 +237,8 @@ export class ManagedRunner {
 	}
 
 	requireDriver(entry, epoch) {
-		if (!this.reconciled || entry.quarantined || !entry.driver || !epoch || epoch.connectionId !== this.connectionId ||
-			JSON.stringify(epoch) !== JSON.stringify(entry.epoch)) throw new Error("stale_ownership");
+		if (!this.reconciled || entry.quarantined || !epoch || epoch.connectionId !== this.connectionId ||
+			JSON.stringify(epoch) !== JSON.stringify(entry.epoch)) throw new Error("stale_access");
 	}
 
 	info(threadId) {
@@ -248,6 +249,7 @@ export class ManagedRunner {
 
 	async open(entry) {
 		if (entry.restoring) throw new Error("restore_in_progress");
+		if (entry.record.interactive) throw new Error("start_thread_in_local_terminal");
 		if (entry.runtime) {
 			await entry.runtime.ready;
 			return entry.runtime;
@@ -375,13 +377,16 @@ export class ManagedRunner {
 		const entry = this.threads.get(threadId);
 		if (operation === "state") return this.info(threadId);
 		if (operation === "restore") return this.restore(entry, input);
-		if (operation === "ownership") {
+		if (operation === "viewers") {
+			if (!Number.isSafeInteger(input.count) || input.count < 0) throw new Error("invalid_viewer_count");
+			entry.driver = input.count > 0; this.armIdle(entry); return this.info(threadId);
+		}
+		if (operation === "access") {
 			const epoch = input.epoch;
-			if (!this.reconciled || epoch?.connectionId !== this.connectionId || epoch?.bootId !== this.bootId || !Number.isSafeInteger(epoch.counter) || epoch.counter < 1) throw new Error("stale_ownership");
+			if (!this.reconciled || epoch?.connectionId !== this.connectionId || epoch?.bootId !== this.bootId || !Number.isSafeInteger(epoch.counter) || epoch.counter < 1) throw new Error("stale_access");
 			uuid(epoch.incarnation);
-			if (entry.epoch?.connectionId === epoch.connectionId && epoch.counter <= entry.epoch.counter) throw new Error("stale_ownership");
+			if (entry.epoch?.connectionId === epoch.connectionId && epoch.counter <= entry.epoch.counter) throw new Error("stale_access");
 			entry.epoch = epoch;
-			entry.driver = input.driver === true;
 			this.armIdle(entry);
 			return { epoch };
 		}
@@ -390,6 +395,7 @@ export class ManagedRunner {
 		if (operation === "release") { entry.driver = false; this.armIdle(entry); return this.info(threadId); }
 		if (operation === "sleep") { this.requireDriver(entry, input.epoch); await this.sleep(entry, true); return this.info(threadId); }
 		if (operation === "entries") {
+			if (entry.native) return entry.native.entries();
 			if (entry.runtime) return this.rpc(await this.open(entry), "get_entries");
 			const saved = loadCheckpoint(entry.record.checkpointFile, entry.record.sessionFile, entry.record.piSessionId, entry.record.effectiveCwd);
 			return { entries: saved.entries, leafId: saved.leafId };
@@ -401,9 +407,15 @@ export class ManagedRunner {
 		const receipt = entry.journal.receive(commandId, payload, input.epoch);
 		if (previous) return receipt;
 		try {
+			if (entry.native) {
+				this.commandStatus(entry, commandId, "dispatching");
+				await entry.native.command(input);
+				return entry.journal.get(commandId);
+			}
 			if (operation === "prompt") {
 				if (entry.syncError) throw new Error("sync_error");
 				if (entry.cloudCheck) throw new Error("sync_reconciling");
+				if (entry.state === "stopping") await entry.runtime.exited;
 				if (!["sleeping", "idle", "interrupted"].includes(entry.state)) throw new Error("runtime_busy");
 				clearTimeout(entry.idle);
 				const runtime = await this.open(entry);
@@ -414,7 +426,7 @@ export class ManagedRunner {
 				entry.record.runId = commandId;
 				durableWrite(entry.recordFile, entry.record);
 				this.commandStatus(entry, commandId, "dispatching");
-				void this.rpc(runtime, "prompt", { message }).then(() => {
+				void this.rpc(runtime, "prompt", { message, streamingBehavior: input.behavior ?? "followUp" }).then(() => {
 					this.commandStatus(entry, commandId, "accepted");
 				}).catch(() => { this.commandStatus(entry, commandId, "unknown"); });
 				return entry.journal.get(commandId);
@@ -466,10 +478,16 @@ export class ManagedRunner {
 					if (envelope.type === "inventory_confirmed" && envelope.connectionId === this.connectionId) {
 						this.reconciled = true;
 						for (const entry of this.threads.values()) {
+							if (!envelope.heads?.some((item) => item.threadId === entry.record.threadId) && !envelope.quarantined?.includes(entry.record.threadId)) continue;
 							entry.quarantined = envelope.quarantined?.includes(entry.record.threadId) === true;
 							if (entry.quarantined) {
 								console.error(JSON.stringify({ event: "thread_missing_from_catalog", threadId: entry.record.threadId, bootId: this.bootId }));
 								continue;
+							}
+							if (entry.record.registration) {
+								entry.record.registered = true;
+								delete entry.record.registration;
+								durableWrite(entry.recordFile, entry.record);
 							}
 							const head = envelope.heads?.find((item) => item.threadId === entry.record.threadId)?.head;
 							const pendingHash = entry.sync.pending && createHash("sha256").update(entry.sync.pending.bytes).digest("hex");

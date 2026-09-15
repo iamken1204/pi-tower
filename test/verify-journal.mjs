@@ -10,6 +10,9 @@ try {
 	const atLimit = "🙂".repeat(65536);
 	assert.equal(commandPayload({ operation: "prompt", message: atLimit }).message, atLimit);
 	assert.throws(() => commandPayload({ operation: "prompt", message: atLimit + "x" }), /invalid_command/);
+	assert.equal(commandPayload({ operation: "prompt", message: "queued" }).behavior, undefined);
+	assert.equal(commandPayload({ operation: "prompt", message: "now", behavior: "steer" }).behavior, "steer");
+	assert.throws(() => commandPayload({ operation: "prompt", message: "bad", behavior: "interrupt" }), /invalid_command/);
 	const payload = commandPayload({ operation: "prompt", message: "asymmetric fixture 73" });
 	let journal = new CommandJournal(directory, randomUUID());
 	const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];

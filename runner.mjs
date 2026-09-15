@@ -18,12 +18,15 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
+			console.log("Interactive TUI + web: --interactive --data-dir <path> [--thread <thread UUID>]\nStart in the workspace; --thread resumes its original cwd. One process per runner data directory.");
 			console.log("pi-runner --hq <ws(s)://host> [--id name] [--token t | --token-file path] [-- <pi args>]\nManaged: --managed-threads --data-dir <path> [--pi-package <npm package directory>]\n--managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_RUNNER_DATA_DIR supplies --data-dir. Managed mode rejects passthrough pi args.\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--hq") opts.hq = argv[++i];
 		else if (argv[i] === "--id") opts.id = argv[++i];
 		else if (argv[i] === "--managed-threads") opts.managed = true;
+		else if (argv[i] === "--interactive") { opts.interactive = true; opts.managed = true; }
+		else if (argv[i] === "--thread") opts.threadId = argv[++i];
 		else if (argv[i] === "--data-dir") opts.dataDir = argv[++i];
 		else if (argv[i] === "--pi-package") opts.piPackage = argv[++i];
 		else if (argv[i] === "--managed-idle-ms") opts.idleTtlMs = Number(argv[++i]);
@@ -57,12 +60,17 @@ function parseArgs(argv) {
 		process.exit(1);
 	}
 	if (opts.managed && (!opts.dataDir || opts.piArgs.length)) throw new Error("managed mode requires --data-dir and rejects passthrough pi args; configure pi through its settings");
+	if (opts.threadId && !opts.interactive) throw new Error("--thread requires --interactive");
 	if (opts.idleTtlMs !== undefined && (!Number.isSafeInteger(opts.idleTtlMs) || opts.idleTtlMs < 0)) throw new Error("invalid managed idle TTL");
 	if (opts.maxAwake !== undefined && (!Number.isSafeInteger(opts.maxAwake) || opts.maxAwake < 1)) throw new Error("invalid awake limit");
 	return opts;
 }
 
 const options = parseArgs(process.argv.slice(2));
+if (options.interactive) {
+	await (await import("./managed-interactive.mjs")).runInteractive(options);
+	process.exit(0);
+}
 const { hq, id, token, piArgs } = options;
 const managed = options.managed ? new ManagedRunner(options) : null;
 managed?.connect({ hq, token });

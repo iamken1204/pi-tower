@@ -61,7 +61,7 @@ async function attach(threadId, drive = true) {
 	sockets.add(ws);
 	const frames = [];
 	let epoch;
-	ws.onmessage = ({ data }) => { const frame = JSON.parse(data); frames.push(frame); if (frame.type === "ownership_changed") epoch = frame.epoch; };
+	ws.onmessage = ({ data }) => { const frame = JSON.parse(data); frames.push(frame); if (frame.type === "access_changed") epoch = frame.epoch; };
 	await once(ws, "open");
 	const client = { ws, frames, get epoch() { return epoch; }, async request(operation, fields = {}, allowError = false) {
 		const requestId = randomUUID();
@@ -70,7 +70,7 @@ async function attach(threadId, drive = true) {
 		if (!allowError) assert.equal(reply.error, undefined, JSON.stringify({ reply, starts: starts() }));
 		return reply.error ? reply : reply.result;
 	} };
-	if (drive) await client.request("acquire");
+	await until(() => epoch, "automatic access");
 	return client;
 }
 function close(client) { client.ws.close(); sockets.delete(client.ws); }
@@ -184,7 +184,7 @@ try {
 	assert.equal(readFileSync(orphanRecordFile, "utf8"), orphanRecord, "a catalog orphan remains untouched on its original runner");
 	assert.equal((await fetch(`http://127.0.0.1:${port}/api/threads/${orphan.threadId}`, { headers: { authorization: `Bearer ${token}` } }).then((res) => res.json())).error, "unknown_thread");
 	assert.notEqual((await history(id)).revision.generationId, backedUpHead.revision.generationId, "rollback reconciliation requires a fresh generation");
-	assert.equal((await client.request("prompt", { message: "stale permission", epoch: oldOwnership }, true)).error, "stale_ownership");
+	assert.equal((await client.request("prompt", { message: "stale permission", epoch: oldOwnership }, true)).error, "stale_access");
 	assert.equal((await client.request("command", { commandId: offlineCommand })).status, "settled");
 	await client.request("prompt", { message: "slow", commandId: offlineCommand });
 	assert.deepEqual(await client.request("entries"), { entries: offlineCheckpoint.entries, leafId: offlineCheckpoint.leafId });
@@ -223,7 +223,7 @@ try {
 	assert.equal(restored.status, 200, JSON.stringify(restored));
 	assert.deepEqual(await client.request("entries"), { entries: offlineCheckpoint.entries, leafId: offlineCheckpoint.leafId });
 	assert.equal((await restore()).body.error, "restore_requires_missing_session_and_no_child");
-	await client.request("acquire");
+	await until(() => client.epoch, "access after restore");
 	let metadata = (await api(`/api/threads/${id}`)).body;
 	const updatedAt = metadata.updatedAt;
 	metadata = (await api(`/api/threads/${id}`, "PATCH", { title: "Search needle 73", metadataVersion: metadata.metadataVersion })).body;
@@ -249,26 +249,19 @@ try {
 	assert.equal(starts().length, 2, "invalid sessions must fail before child startup");
 	close(brokenClient);
 	const viewer = await attach(id, false);
-	assert.equal((await viewer.request("prompt", { message: "viewer must not write" }, true)).error, "stale_ownership");
-	assert.equal((await viewer.request("acquire", {}, true)).error, "driver_occupied");
-	assert.equal((await viewer.request("takeover", {}, true)).error, "takeover_confirmation_required");
+	assert.deepEqual(viewer.epoch, client.epoch, "both devices have the same nonexclusive access");
+	assert.equal((await viewer.request("prompt", { message: "missing epoch", epoch: null }, true)).error, "stale_access");
 	const dialogRun = randomUUID();
 	await client.request("prompt", { message: "dialog", commandId: dialogRun });
 	const waiting = await until(async () => { const state = await client.request("state"); return state.state === "waiting_input" && state; }, "pending dialog");
-	const oldEpoch = client.epoch;
-	await viewer.request("takeover", { confirmed: true });
-	assert.notDeepEqual(viewer.epoch, oldEpoch);
 	const replyFields = { targetRunId: dialogRun, dialogId: waiting.pendingDialogs[0].id, value: true };
-	assert.equal((await client.request("extension_ui_response", { ...replyFields, epoch: oldEpoch }, true)).error, "stale_ownership");
-	assert.deepEqual((await viewer.request("state")).pendingDialogs, waiting.pendingDialogs, "takeover must retain the blocking dialog");
+	assert.deepEqual((await viewer.request("state")).pendingDialogs, waiting.pendingDialogs, "another client sees the same blocking dialog");
 	await viewer.request("extension_ui_response", replyFields);
 	await until(async () => (await viewer.request("state")).state === "idle", "dialog run settled");
 	assert.equal((await viewer.request("entries")).entries.find((e) => e.customType === "dialog-answer").data.confirmed, true);
 	assert.equal((await viewer.request("extension_ui_response", replyFields, true)).error, "stale_or_invalid_dialog");
-	await viewer.request("release");
-	await client.request("acquire");
 	close(viewer);
-	console.log("ok ownership: viewer writes denied; acknowledged takeover fences old epoch and retains/replies to real pi dialog");
+	console.log("ok access: both clients can operate without takeover; missing epoch rejected; real pi dialog resolves once");
 	const duplicate = runner();
 	await once(duplicate, "exit"); processes.delete(duplicate);
 	assert.notEqual(duplicate.exitCode, 0); assert.match(duplicate.log, /writer_locked/);
