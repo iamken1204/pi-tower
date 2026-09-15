@@ -2,6 +2,14 @@
 
 第 1～3 階段的主要路徑已實作，第 4 階段容器驗證已通過，仍待其餘驗收矩陣收尾；**尚不宣稱 v1 完成**。依據 [v1 規格](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。使用者已授權接續各階段及本機 commit，未授權 push、部署或發布。
 
+## 本機互動式 pi：新目標與第一組實測
+
+使用者已改為本機原生 TUI 與網頁共用同一 thread，取消所有手動控制權流程，不要求 orb 行為，並排除 extension editor 的網頁回答。最新契約見規格開頭的互動模式修訂。下文的 ownership 與 browser-first 描述記錄舊實作，不是新目標已完成的證據。
+
+`node test/compat/verify-interactive.mjs` 使用獨立 tmux server、隔離 HOME／pi profile／workspace 與 faux provider，在真實 pi 0.85.1、Node 26.8.2 通過：終端先輸入、公開 SDK 遠端輸入顯示在同一原生 TUI、執行中遠端 follow-up 確實進入佇列、遠端回答 confirm 後本機 dialog 關閉且可繼續輸入，以及遠端 transport 關閉後本機仍收到新回答。沒有付費 LLM 呼叫或私有 API。
+
+這是 SDK／TUI 相容性測試，遠端入口使用本機 Unix socket，不是正式 Tower 或瀏覽器測試。尚待整合本機 thread 註冊、全端命令收據／排序、取消 driver 機制、網頁佇列，以及 `/reload`／session 切換後的 bridge 重建；select／input、雙端同時輸入與同時回答也尚未由此測試證明。不得把這個 probe 當成可供使用者啟動的 managed 互動模式。
+
 ## 持久化與還原契約
 
 Managed mode 明確啟用，legacy relay 保留原有使用方式。實測 pi 0.85.1、Node 22.22.0／26.8.2、better-sqlite3 13.0.3；只測過這個 pi 版本，不把它稱為最低支援版本。Tower 使用單一 SQLite，schema version 3、WAL、FULL、1250 ms busy timeout。沒有 S3。

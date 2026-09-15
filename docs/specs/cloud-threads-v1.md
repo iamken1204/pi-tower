@@ -1,5 +1,17 @@
 # Cloud Threads v1 handoff spec
 
+## 2026-09-15 使用者確認的互動模式修訂
+
+本節取代下文與其衝突的 browser-first、單一 driver、操作權交接與完整 editor dialog 要求；其餘持久化、驗證、去重、legacy 相容性及不修改 pi 核心的限制仍適用。這是新目標，不代表目前程式已完成。
+
+- 以本機互動式 pi runner 為核心。本機啟動的同一個 thread 可從原生 TUI 與網頁直接傳送訊息，兩端看到相同對話與執行結果，不另外啟動第二個 session 或 writer。
+- 不提供 Get control、Release control、Take over 或相同功能的前置流程。多個輸入端不代表多個 writer；系統負責命令排序、去重及過期訊息防護。
+- 執行中仍可輸入；預設排入 follow-up 佇列，另支援 steering 與停止。不能僅移除按鈕而保留「忙碌時禁止輸入」的行為。
+- Runner 的實際存活與連線決定網頁能否執行。沒有 orb、跨主機接手或替代 runtime；runner 不可用時，網頁顯示不可執行且不受理新工作留待日後執行。已送出但結果不明的命令不自動重播。
+- 關閉網頁不影響本機 pi；Tower 斷線時，本機仍可輸入與執行，恢復連線後補同步。這不承諾主機休眠、程序退出後工作仍在執行。
+- Extension 的 select／confirm／input 須能在任一端回答，第一個有效回答後關閉另一端的提示，拒絕過期回答。
+- 不支援 extension `ctx.ui.editor()` 的跨端同步與網頁回答。本機功能保留，網頁只提示須在本機完成。這不限制一般聊天輸入框。
+
 ## 1. 交付目標
 
 在不修改 pi 核心的前提下，讓使用者透過 pi-tower 瀏覽持久化的 thread 清單、閱讀雲端歷史，並從另一台裝置繼續同一個遠端工作。
