@@ -335,6 +335,14 @@
 				color: var(--muted);
 				font-size: 9px;
 			}
+			.workspace-cell {
+				display: grid;
+				min-width: 0;
+			}
+			.thread-host {
+				color: var(--muted);
+				font-size: 9px;
+			}
 			.cell {
 				display: flex;
 				min-width: 0;
@@ -405,7 +413,7 @@
 			}
 			.status-grid {
 				display: grid;
-				grid-template-columns: repeat(5, minmax(0, 1fr));
+				grid-template-columns: repeat(6, minmax(0, 1fr));
 				border-bottom: 1px solid;
 			}
 			.status-item {
@@ -807,6 +815,7 @@
 					<div class="status-grid">
 						<div class="status-item"><span class="eyebrow">Runner</span><b id="runner-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Workspace</span><b id="workspace-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Host</span><b id="host-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Runtime</span><b id="runtime-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Cloud sync</span><b id="sync-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Checkpoint</span><b id="revision-state">—</b></div>
@@ -994,7 +1003,7 @@
 					li.append(
 						link,
 						cell(row.runnerId),
-						cell(row.cwd || "—"),
+						cell(workspaceCell(row)),
 						cell(formatDate(row.updatedAt)),
 						cell(pill(row.online ? row.runtime?.state || "sleeping" : "offline")),
 						cell(pill(row.runtime?.sync || "synced")),
@@ -1011,6 +1020,21 @@
 				}
 				$("empty").classList.toggle("hidden", state.threads.length > 0);
 				$("more").classList.toggle("hidden", !state.cursor);
+			}
+			function workspaceCell(row) {
+				const wrap = document.createElement("span");
+				wrap.className = "workspace-cell";
+				wrap.title = `${row.cwd || "—"}${row.hostname ? `\n${row.hostname}` : ""}`;
+				const dir = document.createElement("span");
+				dir.textContent = row.cwd || "—";
+				wrap.append(dir);
+				if (row.hostname) {
+					const host = document.createElement("span");
+					host.className = "thread-host";
+					host.textContent = row.hostname;
+					wrap.append(host);
+				}
+				return wrap;
 			}
 			function cell(content) {
 				const div = document.createElement("div");
@@ -1100,6 +1124,7 @@
 				$("thread-id").textContent = row.threadId;
 				$("runner-state").replaceChildren(pill(row.online ? "online" : "offline"));
 				$("workspace-state").textContent = row.cwd || "—";
+				$("host-state").textContent = row.hostname || "—";
 				$("runtime-state").replaceChildren(pill(runtime.state || "sleeping"));
 				$("sync-state").replaceChildren(pill(runtime.sync || "synced"));
 				$("revision-state").textContent =

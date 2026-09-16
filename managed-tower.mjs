@@ -1,7 +1,7 @@
 // Phase-1 catalog and isolated programmatic transport. No raw pi RPC reaches managed children.
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { statSync, statfsSync } from "node:fs";
 import { firstPrompt, privateDirectory, uuid } from "./managed-storage.mjs";
 import { createSnapshotStore } from "./managed-snapshots.mjs";
@@ -26,7 +26,7 @@ export function createManagedTower(dataDir, {
 	db.pragma("busy_timeout = 1250");
 	db.pragma("wal_autocheckpoint = 1000");
 	const schema = db.pragma("user_version", { simple: true });
-	if (schema > 4) { db.close(); throw new Error("unsupported_tower_schema"); }
+	if (schema > 5) { db.close(); throw new Error("unsupported_tower_schema"); }
 	db.transaction(() => {
 		db.exec(`CREATE TABLE IF NOT EXISTS managed_runners (runnerId TEXT PRIMARY KEY, instanceId TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS threads (
@@ -34,13 +34,14 @@ export function createManagedTower(dataDir, {
 			runnerInstanceId TEXT NOT NULL, title TEXT NOT NULL, createdAt TEXT NOT NULL,
 			workspaceId TEXT, piSessionId TEXT, metadataVersion INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE IF NOT EXISTS managed_commands (threadId TEXT NOT NULL, commandId TEXT NOT NULL, payloadHash TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(threadId,commandId));
-		PRAGMA user_version = 4;`);
+		PRAGMA user_version = 5;`);
 		if (schema < 3) db.exec(`ALTER TABLE threads ADD COLUMN updatedAt TEXT;
 			ALTER TABLE threads ADD COLUMN archivedAt TEXT;
 			ALTER TABLE threads ADD COLUMN createTitle TEXT;
 			UPDATE threads SET updatedAt=createdAt, createTitle=title;
 			CREATE INDEX threads_activity ON threads(updatedAt DESC,threadId DESC);`);
 		if (schema < 4) db.exec("ALTER TABLE threads ADD COLUMN cwd TEXT");
+		if (schema < 5) db.exec("ALTER TABLE threads ADD COLUMN hostname TEXT");
 	})();
 	const snapshots = createSnapshotStore(db, { maxSnapshotBytes, maxTotalBytes });
 	let uploads = 0;
@@ -66,17 +67,18 @@ export function createManagedTower(dataDir, {
 	let epochCounter = 0;
 	const liveStates = new Map();
 	const thread = (id) => {
-		const row = db.prepare("SELECT threadId, runnerId, runnerInstanceId, title, createdAt, updatedAt, archivedAt, workspaceId, piSessionId, cwd, metadataVersion FROM threads WHERE threadId=?").get(uuid(id));
+		const row = db.prepare("SELECT threadId, runnerId, runnerInstanceId, title, createdAt, updatedAt, archivedAt, workspaceId, piSessionId, cwd, hostname, metadataVersion FROM threads WHERE threadId=?").get(uuid(id));
 		if (!row) throw new Error("unknown_thread");
 		return row;
 	};
 	const workspace = (value) => { if (typeof value !== "string" || !value) throw new Error("invalid_workspace"); return value; };
+	const hostnameOf = (value) => { if (value == null) return null; if (typeof value !== "string" || !value || Buffer.byteLength(value) > 4096) throw new Error("invalid_hostname"); return value; };
 	const connections = (runnerId) => [...runners.values()].filter((runner) => runner.id === runnerId && runner.ready);
 	const host = (row) => { const runner = hosts.get(row.threadId); return runner?.ready ? runner : undefined; };
 	// Where a runner can host new threads: every directory one of its processes started in or already has a thread in.
 	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").pluck().all(runnerId)])].sort();
 	const isActive = (row) => !row.archivedAt && !!host(row) && AWAKE.has(liveStates.get(row.threadId)?.state);
-	const describe = (row) => ({ ...row, online: !!host(row), active: isActive(row),
+	const describe = (row) => ({ ...row, project: row.cwd ? basename(row.cwd) || row.cwd : null, online: !!host(row), active: isActive(row),
 		runtime: liveStates.get(row.threadId) ?? { state: "sleeping", sync: "pending" },
 		latestSnapshotRevision: snapshots.head(row.threadId)?.revision ?? null });
 	const send = (ws, value) => {
@@ -159,7 +161,7 @@ export function createManagedTower(dataDir, {
 		if (result.threadId !== row.threadId || result.runnerInstanceId !== row.runnerInstanceId) throw new Error("thread_binding_mismatch");
 		uuid(result.piSessionId); uuid(result.workspaceId); workspace(result.cwd);
 		if (row.piSessionId && (row.piSessionId !== result.piSessionId || row.workspaceId !== result.workspaceId || (row.cwd && row.cwd !== result.cwd))) throw new Error("session_binding_mismatch");
-		db.prepare("UPDATE threads SET piSessionId=?, workspaceId=?, cwd=? WHERE threadId=?").run(result.piSessionId, result.workspaceId, result.cwd, row.threadId);
+		db.prepare("UPDATE threads SET piSessionId=?, workspaceId=?, cwd=?, hostname=COALESCE(?, hostname) WHERE threadId=?").run(result.piSessionId, result.workspaceId, result.cwd, hostnameOf(result.hostname), row.threadId);
 	}
 	function handleRunner(ws, params) {
 		let id, instanceId;

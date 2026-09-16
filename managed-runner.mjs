@@ -104,7 +104,7 @@ export class ManagedRunner {
 	}
 
 	inventory() {
-		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId, cwd: record.effectiveCwd,
+		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId, cwd: record.effectiveCwd, hostname: this.identity.host,
 			registration: record.registration, inputReady: record.interactive ? !!native : undefined, queueSupported: !!native, queue: native?.queue() ?? [],
 			piSessionId: record.piSessionId, state, runId: activeCommand ?? null, pendingDialogs: [...dialogs.values()],
 			missingSession: !existsSync(record.sessionFile),
