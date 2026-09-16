@@ -191,6 +191,8 @@ export async function runInteractive(options) {
 				entry.record.awake = false; durableWrite(entry.recordFile, entry.record); publish();
 			});
 		}] } });
+		// Provider registration refreshes asynchronously; resolve availability before model selection.
+		await services.modelRuntime.getAvailable();
 		const created = await api.createAgentSessionFromServices({ ...opts, services }); session = created.session;
 		return { ...created, services, diagnostics: services.diagnostics };
 	};

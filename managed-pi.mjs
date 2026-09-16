@@ -28,6 +28,8 @@ function save() {
 
 const runtime = await api.createAgentSessionRuntime(async (options) => {
 	const services = await api.createAgentSessionServices(options);
+	// Provider registration refreshes asynchronously; resolve availability before model selection.
+	await services.modelRuntime.getAvailable();
 	return { ...await api.createAgentSessionFromServices({ ...options, services }), services, diagnostics: services.diagnostics };
 }, { cwd: process.cwd(), agentDir: api.getAgentDir(), sessionManager: sm });
 
