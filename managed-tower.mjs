@@ -6,6 +6,7 @@ import { statSync, statfsSync } from "node:fs";
 import { firstPrompt, privateDirectory, uuid } from "./managed-storage.mjs";
 import { createSnapshotStore } from "./managed-snapshots.mjs";
 import { commandPayload, payloadHash } from "./managed-journal.mjs";
+import { createCollaborationStore, collaborationMetadata, collaborationPageLimit } from "./managed-collaboration-store.mjs";
 
 // Runtime states with a live pi process; sleeping, interrupted and error threads are inactive.
 const AWAKE = new Set(["starting", "idle", "running", "waiting_input", "stopping"]);
@@ -43,6 +44,8 @@ export function createManagedTower(dataDir, {
 		if (schema < 4) db.exec("ALTER TABLE threads ADD COLUMN cwd TEXT");
 		if (schema < 5) db.exec("ALTER TABLE threads ADD COLUMN hostname TEXT");
 	})();
+	const collaboration = createCollaborationStore(db);
+	collaboration.recover();
 	const snapshots = createSnapshotStore(db, { maxSnapshotBytes, maxTotalBytes });
 	let uploads = 0;
 	const checkpointTimer = setInterval(() => { try { db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* Busy timeout is bounded; committed WAL remains durable. */ } }, 60_000);
@@ -79,8 +82,19 @@ export function createManagedTower(dataDir, {
 	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").pluck().all(runnerId)])].sort();
 	const isActive = (row) => !row.archivedAt && !!host(row) && AWAKE.has(liveStates.get(row.threadId)?.state);
 	const describe = (row) => ({ ...row, project: row.cwd ? basename(row.cwd) || row.cwd : null, online: !!host(row), active: isActive(row),
+		canDelegate: !unavailable(row), unavailableReason: unavailable(row),
 		runtime: liveStates.get(row.threadId) ?? { state: "sleeping", sync: "pending" },
 		latestSnapshotRevision: snapshots.head(row.threadId)?.revision ?? null });
+	// Why a thread cannot take delegated work right now; null means it can.
+	function unavailable(row) {
+		const runner = host(row), live = liveStates.get(row.threadId);
+		if (!runner || runner.instanceId !== row.runnerInstanceId) return "runner_offline";
+		if (row.archivedAt) return "thread_archived";
+		if (metadataChanging.has(row.threadId) || restores.has(row.threadId)) return "metadata_update_in_progress";
+		if (!live?.collaborationReady || live.inputReady === false) return "runtime_unavailable";
+		if (live.sync !== "synced") return "sync_not_ready";
+		return null;
+	}
 	const send = (ws, value) => {
 		if (ws.readyState !== 1) return;
 		if (ws.bufferedAmount > maxViewerBuffer) { ws.close(1009, "resync_required"); return; }
@@ -89,6 +103,77 @@ export function createManagedTower(dataDir, {
 	const broadcast = (threadId, value) => {
 		for (const client of clients.get(threadId) ?? []) send(client, value);
 	};
+	function changedTask(task) {
+		for (const threadId of [task.sourceThreadId, task.targetThreadId]) broadcast(threadId, { type: "collaboration_changed", threadId });
+		return task;
+	}
+	const notifying = new Set();
+	// Deliver saved reports to their source thread while its runtime can take them; never wake one for it.
+	async function notifyResults(row) {
+		if (notifying.has(row.threadId) || unavailable(row)) return;
+		notifying.add(row.threadId);
+		try {
+			for (const task of collaboration.pendingNotifications(row.threadId)) {
+				try {
+					const receipt = await request(row, "collaboration_notify", { task });
+					if (["delivered", "unknown"].includes(receipt?.status)) changedTask(collaboration.acknowledge(row.threadId, task.taskId, receipt.status));
+				} catch { break; } // Retry transport only; the runner checks durable notification IDs before triggering.
+			}
+		} finally { notifying.delete(row.threadId); }
+	}
+	// Tool calls arrive over the authenticated runner channel; the source thread is the one the connection hosts.
+	async function collaborationCall(source, operation, input) {
+		if (operation === "thread_metadata") {
+			source = thread(source.threadId);
+			if (input.title !== undefined) {
+				if (typeof input.title !== "string" || input.title.length > 200) throw new Error("invalid_metadata");
+				if (source.title !== input.title) {
+					if (input.metadataVersion !== source.metadataVersion) throw new Error("metadata_conflict");
+					db.prepare("UPDATE threads SET title=?,metadataVersion=metadataVersion+1 WHERE threadId=?").run(input.title, source.threadId);
+					source = thread(source.threadId);
+					broadcast(source.threadId, { type: "state", thread: describe(source), runtime: liveStates.get(source.threadId), online: true });
+					onPresence();
+				}
+			}
+			return { title: source.title, metadataVersion: source.metadataVersion };
+		}
+		if (operation === "thread_list") {
+			const limit = collaborationPageLimit(input.limit);
+			if (input.cursor !== undefined) uuid(input.cursor);
+			for (const key of ["project", "hostname", "runnerId"]) if (input[key] !== undefined) collaborationMetadata(input[key], key);
+			const rows = [...hosts.entries()].filter(([threadId, owner]) => owner.ready && threadId !== source.threadId && threadId > (input.cursor ?? ""))
+				.sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
+				.map(([threadId]) => describe(thread(threadId)))
+				.filter((row) => !row.archivedAt &&
+					(input.project === undefined || row.project === input.project) &&
+					(input.hostname === undefined || row.hostname === input.hostname) &&
+					(input.runnerId === undefined || row.runnerId === input.runnerId))
+				.map((row) => ({ threadId: row.threadId, title: row.title, runnerId: row.runnerId, project: row.project, hostname: row.hostname, cwd: row.cwd,
+					state: row.runtime.state, canDelegate: row.canDelegate, unavailableReason: row.unavailableReason }));
+			return { threads: rows.slice(0, limit), nextCursor: rows.length > limit ? rows[limit - 1].threadId : null };
+		}
+		if (operation === "thread_tasks") return collaboration.list(source.threadId, input);
+		if (operation === "thread_report") {
+			const task = changedTask(collaboration.report(source.threadId, input));
+			void notifyResults(thread(task.sourceThreadId));
+			return task;
+		}
+		if (operation !== "thread_delegate") throw new Error("invalid_collaboration_operation");
+		const target = thread(input.targetThreadId);
+		const { task, created } = collaboration.create({ sourceThreadId: source.threadId, targetThreadId: target.threadId, targetRunnerInstanceId: target.runnerInstanceId,
+			requestId: input.requestId, prompt: input.prompt, sourceRunnerId: source.runnerId, targetRunnerId: target.runnerId, sourceName: source.title, targetName: target.title });
+		if (!created) return task;
+		changedTask(task);
+		if (unavailable(target)) return changedTask(collaboration.transition(task.taskId, "rejected"));
+		try {
+			const epoch = await ensureAccess(target);
+			if (unavailable(thread(target.threadId))) return changedTask(collaboration.transition(task.taskId, "rejected"));
+			await execute(target, { operation: "prompt", message: task.prompt, behavior: "followUp", task, commandId: task.commandId, epoch });
+			return collaboration.get(task.taskId);
+		} catch {
+			return changedTask(collaboration.transition(task.taskId, "unknown"));
+		}
+	}
 	function accessChanged(threadId, epoch = accesses.get(threadId)?.epoch ?? null) {
 		broadcast(threadId, { type: "access_changed", threadId, epoch });
 	}
@@ -118,11 +203,19 @@ export function createManagedTower(dataDir, {
 	function saveReceipt(threadId, receipt) {
 		uuid(receipt.commandId);
 		if (payloadHash(receipt.payload) !== receipt.payloadHash || !["received", "dispatching", "accepted", "rejected", "settled", "unknown"].includes(receipt.status)) throw new Error("invalid_receipt");
+		if (receipt.payload.task) {
+			commandPayload({ ...receipt.payload, commandId: receipt.commandId });
+			const task = receipt.payload.task, target = thread(threadId);
+			if (task.targetThreadId !== threadId || task.targetRunnerId !== target.runnerId || task.targetRunnerInstanceId !== target.runnerInstanceId) throw new Error("task_binding_mismatch");
+			const source = db.prepare("SELECT runnerId FROM threads WHERE threadId=?").get(task.sourceThreadId);
+			if (source?.runnerId === task.sourceRunnerId) collaboration.reconcile(task); // Runner journals can outlive an older Tower backup.
+		}
 		const old = command(threadId, receipt.commandId);
 		if (old && old.payloadHash !== receipt.payloadHash) throw new Error("command_payload_conflict");
 		if (old && ["settled", "rejected"].includes(old.status)) return old;
 		db.prepare("INSERT INTO managed_commands VALUES (?,?,?,?) ON CONFLICT(threadId,commandId) DO UPDATE SET receipt=excluded.receipt")
 			.run(threadId, receipt.commandId, receipt.payloadHash, JSON.stringify(receipt));
+		if (["accepted", "rejected", "settled", "unknown"].includes(receipt.status) && db.prepare("SELECT 1 FROM managed_collaboration_tasks WHERE command_id=? AND target_thread_id=?").get(receipt.commandId, threadId)) changedTask(collaboration.updateByCommand(threadId, receipt));
 		broadcast(threadId, { type: "command_status", threadId, receipt });
 		return receipt;
 	}
@@ -218,6 +311,23 @@ export function createManagedTower(dataDir, {
 					send(ws, { type: "inventory_confirmed", connectionId: runner.connectionId, quarantined: [...runner.orphans], heads: runner.inventory.map((item) => ({ threadId: item.threadId, head: snapshots.head(item.threadId) })) });
 					for (const item of runner.inventory) broadcast(item.threadId, { type: "state", thread: describe(thread(item.threadId)), runtime: item, online: true });
 					for (const item of runner.inventory) if (clients.has(item.threadId)) void ensureAccess(thread(item.threadId)).catch(() => {});
+					for (const item of runner.inventory) void notifyResults(thread(item.threadId));
+				} else if (message.type === "collaboration_request" || message.type === "collaboration_event") {
+					if (runner.orphans?.has(message.threadId)) return;
+					if (!runner.ready || message.connectionId !== runner.connectionId) throw new Error("stale_collaboration_connection");
+					const row = thread(message.threadId);
+					if (row.runnerId !== id || row.runnerInstanceId !== instanceId || hosts.get(row.threadId) !== runner) throw new Error("event_binding_mismatch");
+					if (message.type === "collaboration_request") {
+						uuid(message.requestId);
+						void collaborationCall(row, message.operation, message.input ?? {}).then((result) => send(ws, { type: "collaboration_response", requestId: message.requestId, result }),
+							(error) => send(ws, { type: "collaboration_response", requestId: message.requestId, error: error.message }));
+						return;
+					}
+					const task = collaboration.get(message.taskId);
+					if (!task) return; // Retained runner evidence can outlive a source absent from an old backup.
+					if (task.targetThreadId !== row.threadId || task.targetRunnerInstanceId !== instanceId) throw new Error("event_binding_mismatch");
+					if (!["running", "unknown", "rejected"].includes(message.status)) throw new Error("invalid_task_status");
+					changedTask(collaboration.transition(task.taskId, message.status));
 				} else if (message.type === "command_status" || message.type === "runtime_state") {
 					if (runner.orphans?.has(message.threadId)) return;
 					const row = thread(message.threadId);
@@ -227,6 +337,8 @@ export function createManagedTower(dataDir, {
 						const before = liveStates.get(row.threadId)?.state;
 						liveStates.set(row.threadId, message);
 						broadcast(row.threadId, { type: "state", thread: describe(row), runtime: message, online: true });
+						if (["sleeping", "interrupted", "error"].includes(message.state)) collaboration.interruptTarget(row.threadId).forEach(changedTask);
+						void notifyResults(row);
 						if (before !== message.state) onPresence();
 					}
 				} else if (message.type === "result") {
@@ -252,6 +364,7 @@ export function createManagedTower(dataDir, {
 		for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("runner_disconnected_unknown")); }
 		for (const [threadId, owner] of hosts) if (owner === runner) {
 			hosts.delete(threadId);
+			collaboration.interruptTarget(threadId).forEach(changedTask);
 			if (!clients.has(threadId)) continue;
 			accesses.delete(threadId); accessChanged(threadId);
 			broadcast(threadId, { type: "resync_required", threadId, runner: "offline" });
@@ -269,6 +382,7 @@ export function createManagedTower(dataDir, {
 			try {
 				message = JSON.parse(bytes.toString());
 				row = thread(row.threadId);
+				if (message.task !== undefined) throw new Error("invalid_command"); // Only Tower-created tasks reach runners.
 				if (message.version !== 1 || !["subscribe", "state", "entries", "prompt", "abort", "extension_ui_response", "command", "sleep"].includes(message.operation)) throw new Error("invalid_command");
 				uuid(message.requestId);
 				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
@@ -332,6 +446,12 @@ export function createManagedTower(dataDir, {
 					broadcast(row.threadId, { type: "checkpoint_available", threadId: row.threadId, ...ack });
 				} finally { uploads--; }
 				return;
+			}
+			const tasksPath = /^\/api\/threads\/([^/]+)\/tasks$/.exec(url.pathname);
+			if (req.method === "GET" && tasksPath) {
+				const row = thread(tasksPath[1]), filters = Object.fromEntries(url.searchParams);
+				if (filters.limit !== undefined) filters.limit = Number(filters.limit);
+				res.end(JSON.stringify(collaboration.list(row.threadId, filters))); return;
 			}
 			const history = /^\/api\/threads\/([^/]+)\/history$/.exec(url.pathname);
 			if (req.method === "GET" && history) {

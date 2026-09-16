@@ -3,6 +3,9 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
 import { holdWriterLock } from "./managed-lock.mjs";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
 
 const [packageDir, recordFile] = process.argv.slice(2);
 const writerGuard = holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
@@ -26,12 +29,73 @@ function save() {
 	durableWrite(record.checkpointFile, value);
 }
 
+const calls = new Map();
+function callRunner(operation, input) {
+	const requestId = randomUUID();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => { calls.delete(requestId); reject(new Error("runner_timeout_unknown")); }, 11_000);
+		calls.set(requestId, { resolve, reject, timer });
+		process.send?.({ type: "collaboration_request", requestId, operation, input });
+	});
+}
 const runtime = await api.createAgentSessionRuntime(async (options) => {
-	const services = await api.createAgentSessionServices(options);
+	const services = await api.createAgentSessionServices({ ...options, resourceLoaderOptions: { extensionFactories: [(pi) => {
+		registerCollaborationTools(pi, callRunner);
+		pi.on("session_info_changed", (_, ctx) => process.send?.({ type: "session_name", name: ctx.sessionManager.getSessionName() ?? "" }));
+	}] } });
 	// Provider registration refreshes asynchronously; resolve availability before model selection.
 	await services.modelRuntime.getAvailable();
 	return { ...await api.createAgentSessionFromServices({ ...options, services }), services, diagnostics: services.diagnostics };
 }, { cwd: process.cwd(), agentDir: api.getAgentDir(), sessionManager: sm });
+
+// All inputs share the preflight barrier, including prompt work before isStreaming.
+let admitted = false;
+const queue = [];
+function enqueue(work) {
+	return new Promise((resolve, reject) => { queue.push({ work, resolve, reject }); drain(); });
+}
+function drain() {
+	if (admitted || !queue.length) return;
+	const item = queue.shift(); admitted = true;
+	void Promise.resolve().then(item.work).then(item.resolve, item.reject).finally(() => { admitted = false; drain(); });
+}
+const prompt = runtime.session.prompt.bind(runtime.session);
+const abort = runtime.session.abort.bind(runtime.session);
+runtime.session.prompt = (text, options) => enqueue(() => prompt(text, options));
+runtime.session.abort = async () => {
+	for (const item of queue.splice(0)) item.reject(new Error("aborted_before_dispatch"));
+	await abort();
+};
+process.on("message", (message) => {
+	if (message.type === "metadata_name" && (sm.getSessionName() ?? "") !== message.name.trim()) {
+		runtime.session.setSessionName(message.name);
+		save();
+		process.send?.({ type: "checkpoint", settled: false });
+	}
+	if (message.type === "collaboration_response") {
+		const call = calls.get(message.requestId);
+		if (call) { clearTimeout(call.timer); calls.delete(message.requestId); message.error ? call.reject(new Error(message.error)) : call.resolve(message.result); }
+	}
+	if (message.type === "collaboration_task") {
+		const task = message.task;
+		let started = false;
+		void enqueue(async () => {
+			const file = resolve(recordFile, `../task-${task.taskId}.json`);
+			if (existsSync(file)) throw new Error("task_already_dispatched");
+			durableWrite(file, { task, started: true, status: "running" });
+			started = true;
+			process.send?.({ type: "collaboration_state", task, status: "running" });
+			await prompt(taskPrompt(task), { expandPromptTemplates: false, source: "rpc" });
+			save();
+		}).finally(() => {
+			process.send?.({ type: "collaboration_state", task, status: started ? "unknown" : "rejected" });
+			process.send?.({ type: "collaboration_command_done", commandId: task.commandId, status: started ? "unknown" : "rejected" });
+		}).catch(() => {});
+	}
+	if (message.type === "collaboration_notify") void enqueue(() => deliverResult(runtime.session, message.task, recordFile, save)).then(
+		(result) => process.send?.({ type: "collaboration_notification_done", requestId: message.requestId, result }),
+		(error) => process.send?.({ type: "collaboration_notification_done", requestId: message.requestId, error: error.message }));
+});
 
 let checkpointTimer;
 runtime.session.subscribe((event) => {

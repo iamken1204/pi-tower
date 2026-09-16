@@ -2,11 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { ManagedRunner } from "./managed-runner.mjs";
 import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
 import { holdWriterLock } from "./managed-lock.mjs";
+import { registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
 
 export async function runInteractive(options) {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("interactive_requires_terminal");
@@ -75,7 +76,11 @@ export async function runInteractive(options) {
 			durableWrite(entry.recordFile, entry.record);
 			admission = true;
 			notify();
-			return originalPrompt(text, opts).finally(() => {
+			if (opts.task) runner.taskState(entry, opts.task, "running");
+			const work = opts.notification ? deliverResult(session, opts.notification, entry.recordFile, save)
+				: originalPrompt(opts.task ? taskPrompt(opts.task) : text, { ...opts, expandPromptTemplates: opts.task ? false : opts.expandPromptTemplates });
+			return work.finally(() => {
+				if (opts.task) runner.taskState(entry, opts.task, "unknown");
 				admission = false; drain();
 			});
 		};
@@ -106,6 +111,7 @@ export async function runInteractive(options) {
 		session.extensionRunner.setUIContext(composed, "tui");
 		entry.native = { session, ui: session.extensionRunner.getUIContext(),
 			entries: () => ({ entries: sm.getEntries(), leafId: sm.getLeafId() }),
+			notify: (task) => submit(`Task report ${task.taskId}`, { notification: task }),
 			queue: () => [...queued.map(({ message, behavior }) => ({ message, behavior })),
 				...session.getSteeringMessages().map((message) => ({ message, behavior: "steer" })),
 				...session.getFollowUpMessages().map((message) => ({ message, behavior: "followUp" }))],
@@ -115,11 +121,17 @@ export async function runInteractive(options) {
 					if (entry.syncError || entry.cloudCheck) throw new Error("sync_not_ready");
 					pending.set(commandId, true);
 					runner.commandStatus(entry, commandId, "accepted");
-					void submit(input.message, { source: "rpc", streamingBehavior: input.behavior ?? "followUp" }, commandId).then(() => {
+					void submit(input.message, { source: "rpc", streamingBehavior: input.behavior ?? "followUp", task: input.task }, commandId).then(() => {
 						if (disposed) return;
 						save();
 						runner.commandStatus(entry, commandId, pending.get(commandId) ? "settled" : "unknown"); pending.delete(commandId);
-					}, () => { runner.commandStatus(entry, commandId, "unknown"); pending.delete(commandId); });
+					}, () => {
+						if (input.task) {
+							const file = runner.taskFile(entry, input.task.taskId);
+							runner.taskState(entry, input.task, existsSync(file) && readJson(file).started ? "unknown" : "rejected");
+						}
+						runner.commandStatus(entry, commandId, "unknown"); pending.delete(commandId);
+					});
 					return;
 				}
 				if (input.targetRunId !== entry.activeCommand) throw new Error("stale_run");
@@ -178,11 +190,14 @@ export async function runInteractive(options) {
 		}
 		if (!guards.has(entry.recordFile)) guards.set(entry.recordFile, holdWriterLock(resolve(entry.recordFile, "../runtime.sqlite")));
 		entry.record.interactive = true;
-		if (!entry.record.registered) entry.record.registration ??= { createKey: entry.record.threadId, title: "", createdAt: new Date().toISOString() };
+		if (!entry.record.registered) entry.record.registration ??= { createKey: entry.record.threadId, title: opts.sessionManager.getSessionName() ?? "", createdAt: new Date().toISOString() };
+		entry.record.localName ??= opts.sessionManager.getSessionName() ?? "";
 		durableWrite(entry.recordFile, entry.record);
 		let session;
 		const services = await api.createAgentSessionServices({ ...opts, resourceLoaderOptions: { extensionFactories: [(pi) => {
+			registerCollaborationTools(pi, (operation, input) => runner.collaborationTool(entry, operation, input));
 			pi.on("session_start", () => { queueMicrotask(() => attach(session, entry)); });
+			pi.on("session_info_changed", (_, ctx) => runner.observeName(entry, ctx.sessionManager.getSessionName() ?? ""));
 			for (const event of ["session_tree", "session_compact", "session_info_changed"]) pi.on(event, () => {
 				queueMicrotask(() => entry.native?.save());
 			});

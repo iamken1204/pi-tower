@@ -16,6 +16,12 @@ export function commandPayload(input) {
 		dialogId: input.dialogId ?? null, value: input.value ?? null };
 	// Absence is the legacy durable representation and means followUp on dispatch.
 	if (input.operation === "prompt" && input.behavior !== undefined) payload.behavior = input.behavior;
+	if (input.operation === "prompt" && input.task !== undefined) {
+		const task = input.task;
+		for (const key of ["taskId", "commandId", "sourceThreadId", "targetThreadId", "targetRunnerInstanceId"]) uuid(task[key]);
+		if (task.commandId !== input.commandId || task.prompt !== input.message || input.behavior !== "followUp") throw new Error("invalid_task_command");
+		payload.task = task;
+	}
 	return payload;
 }
 export const payloadHash = (payload) => createHash("sha256").update(JSON.stringify(payload)).digest("hex");

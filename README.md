@@ -183,6 +183,30 @@ Native extension select/confirm/input dialogs can be answered from either interf
 
 Run `npm run verify:phase0` for isolated regression tests, and `npm run verify:native` for the actual Tower + native pi + two WebSocket clients test (requires tmux). Both use isolated profiles and no paid LLM calls. Set `PI_NATIVE_PREVIEW=1` for the native test to keep its browser fixture open; it prints a local stop URL that cleans up its test data.
 
+### Asynchronous thread collaboration
+
+Managed pi exposes `thread_list`, `thread_delegate`, `thread_tasks`, and `thread_report`. Discovery covers connected threads across **all projects and hosts in the same HQ**. Optional project, hostname and runner filters match complete values. Choose a thread ID after checking the directory and host; duplicate project names do not identify a unique checkout. Each thread retains one writer. Delegations queue as follow-ups, and the sender can keep working while the target runs. No file isolation, repo synchronization or cross-HQ routing is provided.
+
+Generate a UUID `requestId` once per delegation and reuse it for retries. Admission waits at most 10 seconds; a timeout means unknown, not unexecuted. Query `thread_tasks` with that request ID rather than submitting a new one. Targets must use `thread_report` with the task ID and a `completed` or `failed` summary. An ordinary assistant answer never completes a task. The first durable report is immutable; its outcome is the agent's claim, not independent verification.
+
+The thread page separates runner reports from ordinary user-facing answers, identifies both runners and threads, and distinguishes submitted reports from confirmed receipt. Results automatically reach the original source thread when its runtime is available. `/new` does not receive the previous thread's results; resume that original thread to receive them. Report delivery uses a stable notification ID and durable session evidence. An interrupted insertion with no confirmable session record stays unknown and does not retrigger the agent. LLM or tool side effects are **not exactly-once**.
+
+Every thread already carries its runtime's absolute cwd and, since schema 5, the runner's system hostname; the project shown in listings and used by `thread_list` filters is the directory's last component. Runners collect no other environment variables or directory contents. Paths and hostnames may be sensitive; all authenticated users of this HQ can read them, including for offline threads. Local and Web renames use `metadataVersion`; an offline conflict preserves the local name and shows a warning. Review the Tower name, then rename locally again to resolve it.
+
+Tool queries default to 10 records, maximum 20 per page, ordered by thread/task UUID with an exclusive cursor. Task prompt and report summary limits are 256 KiB of UTF-8 each (`PI_MANAGED_TEXT_BYTES`); metadata/filter values are limited to 4096 UTF-8 bytes, and names to 200 characters. Browser frames retain their 512 KiB limit; the authenticated runner channel retains its 64 MiB limit. JSON escaping and envelopes count toward frame limits.
+
+Tower migrates its SQLite schema to 5 at startup, preserving catalog metadata, snapshots and command receipts. Threads recorded before the upgrade show no host until their runner reconnects. Tasks, first reports and notification state live in that same database; runner task evidence and pending reports live alongside the command journal. Back up both sides before upgrading. Restore an older Tower backup only with the original runner's retained evidence: unconfirmed work becomes unknown, never automatically rerun. Snapshot pruning does not prune collaboration records. There is no downgrade migration.
+
+Reproduce the collaboration checks without real sessions or paid calls:
+
+```sh
+npm run verify:collaboration  # public API gate, store/recovery/protocol, real pi and native TUIs
+npm run verify:phase0        # full regression in disposable HOME/profile/workspace
+node test/compat/collaboration-browser-fixture.mjs # local offline UI fixture; Ctrl-C to stop
+```
+
+The native test requires tmux and uses a private socket and separate temporary pi profiles. The real-pi tests use pi 0.85.1's scripted provider. They exercise parallel target barriers, FIFO admission, explicit reports, automatic results, `/reload`, `/new`, and restarting the original native thread. Protocol tests use fake runners for cross-host routing, conflicts, disconnection, receipt retry, Tower restart and backup restoration. Recovery tests reconstruct specific durable-write boundaries; they are not SIGKILL tests at every instruction. Physical multi-host networking and a deployed HQ are not part of these local checks. See the [collaboration specification and evidence](plans/2-open/env-meta-and-runner-collaboration.md).
+
 ### Docker storage and backup
 
 The Compose deployment enables managed Tower storage at `/data` on the `tower-data` volume. Its web interface is available at `https://<tunnel-hostname>/threads/`. Runner data is separate and must remain on each runner host; each managed runner keeps its own persistent data directory, `~/.pi-tower` unless `PI_RUNNER_DATA_DIR` or `--data-dir` says otherwise.

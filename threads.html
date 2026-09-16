@@ -334,6 +334,7 @@
 			.thread-id {
 				color: var(--muted);
 				font-size: 9px;
+				overflow-wrap: anywhere;
 			}
 			.workspace-cell {
 				display: grid;
@@ -413,7 +414,7 @@
 			}
 			.status-grid {
 				display: grid;
-				grid-template-columns: repeat(6, minmax(0, 1fr));
+				grid-template-columns: repeat(7, minmax(0, 1fr));
 				border-bottom: 1px solid;
 			}
 			.status-item {
@@ -427,6 +428,62 @@
 				display: block;
 				margin-top: 0.2rem;
 				font-size: 12px;
+				overflow-wrap: anywhere;
+			}
+			.collaboration {
+				width: min(100%, 64rem);
+				margin: 1.25rem auto 0;
+				padding-inline: 1.25rem;
+			}
+			.collaboration > h2 {
+				margin: 0 0 0.6rem;
+				font-size: 1.4rem;
+			}
+			.task-card {
+				margin-bottom: 0.8rem;
+				border: 1px solid;
+				border-left: 5px solid var(--cyan);
+				background: var(--raised);
+			}
+			.task-card[data-direction="sent"] {
+				border-left-color: var(--blue);
+			}
+			.task-head,
+			.task-meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.35rem 0.8rem;
+				justify-content: space-between;
+				padding: 0.45rem 0.6rem;
+			}
+			.task-head {
+				background: var(--ink);
+				color: var(--paper);
+				font-size: 10px;
+				font-weight: 800;
+				text-transform: uppercase;
+			}
+			.task-meta {
+				border-bottom: 1px solid;
+				color: var(--muted);
+				font-size: 9px;
+				overflow-wrap: anywhere;
+			}
+			.task-body {
+				padding: 0.7rem;
+			}
+			.task-body p {
+				margin: 0 0 0.55rem;
+				white-space: pre-wrap;
+			}
+			.task-body details summary {
+				cursor: pointer;
+				font-weight: 800;
+			}
+			.task-report {
+				max-height: 18rem;
+				overflow: auto;
+				white-space: pre-wrap;
 			}
 			.conversation {
 				width: min(100%, 64rem);
@@ -667,6 +724,9 @@
 				.conversation {
 					padding: 0.65rem;
 				}
+				.collaboration {
+					padding-inline: 0.65rem;
+				}
 				.entry[data-role] {
 					margin-inline: 0;
 				}
@@ -819,6 +879,7 @@
 						<div class="status-item"><span class="eyebrow">Runtime</span><b id="runtime-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Cloud sync</span><b id="sync-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Checkpoint</span><b id="revision-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Delegation</span><b id="delegation-state">—</b></div>
 					</div>
 					<div id="live-status" class="live-status hidden" role="status" aria-live="polite"></div>
 					<section id="restore" class="restore hidden">
@@ -831,6 +892,10 @@
 					</section>
 					<div id="dialogs"></div>
 					<div id="queue"></div>
+					<section id="collaboration" class="collaboration" aria-labelledby="collaboration-heading">
+						<h2 id="collaboration-heading">Collaboration</h2>
+						<div id="task-list"><p class="eyebrow">Loading saved tasks…</p></div>
+					</section>
 					<div id="conversation" class="conversation" aria-label="Conversation history"></div>
 					<button id="history-more" class="button load-more hidden" type="button">Load older entries</button>
 					<form id="composer" class="composer">
@@ -870,6 +935,9 @@
 				requestMap: new Map(),
 				lastSequence: null,
 				historyLoad: 0,
+				taskLoad: 0,
+				tasks: [],
+				metadataConflict: null,
 				promptPending: false,
 				live: null,
 				reconnectTimer: null,
@@ -1112,7 +1180,7 @@
 				$("list-view").classList.add("hidden");
 				state.row = await api(`/api/threads/${encodeURIComponent(id)}`);
 				renderThreadState();
-				await loadHistory(true);
+				await Promise.all([loadHistory(true), loadTasks()]);
 				connect();
 				await reconcileCommands();
 			}
@@ -1129,10 +1197,102 @@
 				$("sync-state").replaceChildren(pill(runtime.sync || "synced"));
 				$("revision-state").textContent =
 					row.latestSnapshotRevision == null ? "None" : `${row.latestSnapshotRevision.generationId.slice(0, 8)}:${row.latestSnapshotRevision.counter}`;
+				$("delegation-state").replaceChildren(pill(row.canDelegate ? "available" : "unavailable"));
+				$("delegation-state").title = row.canDelegate ? "This thread can receive delegated tasks." : row.unavailableReason || "Delegation unavailable.";
+				if ((runtime.metadataConflict || null) !== state.metadataConflict) {
+					state.metadataConflict = runtime.metadataConflict || null;
+					if (state.metadataConflict) notice(`Name conflict: ${state.metadataConflict}`, "error");
+				}
 				$("archive-action").textContent = row.archivedAt ? "Unarchive" : "Archive";
 				$("restore").classList.toggle("hidden", !runtime.missingSession);
 				renderQueue(runtime.queue || []);
 				updateControls();
+			}
+			async function loadTasks() {
+				const load = ++state.taskLoad;
+				const tasks = [];
+				let cursor = null;
+				do {
+					const params = new URLSearchParams({ limit: "20" });
+					if (cursor) params.set("cursor", cursor);
+					const page = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}/tasks?${params}`);
+					tasks.push(...(page?.tasks || []));
+					cursor = page?.nextCursor || null;
+				} while (cursor);
+				if (load !== state.taskLoad) return;
+				state.tasks = tasks;
+				renderTasks();
+			}
+			function renderTasks() {
+				const root = $("task-list");
+				root.replaceChildren();
+				if (!state.tasks.length) {
+					const empty = document.createElement("p");
+					empty.className = "eyebrow";
+					empty.textContent = "No sent or received tasks";
+					root.append(empty);
+					return;
+				}
+				for (const task of state.tasks) root.append(renderTask(task));
+			}
+			function renderTask(task) {
+				const sent = task.sourceThreadId === state.row.threadId;
+				const otherName = sent ? task.targetName : task.sourceName;
+				const otherRunner = sent ? task.targetRunnerId : task.sourceRunnerId;
+				const otherThread = sent ? task.targetThreadId : task.sourceThreadId;
+				const card = document.createElement("article");
+				card.className = "task-card";
+				card.dataset.direction = sent ? "sent" : "received";
+				card.id = `task-${task.taskId}`;
+				const head = document.createElement("header");
+				head.className = "task-head";
+				const label = document.createElement("span");
+				label.textContent = task.result
+					? sent ? `Task report from runner ${otherRunner} / thread ${otherName || otherThread}` : `Reply to runner ${otherRunner} / thread ${otherName || otherThread}`
+					: sent ? `Delegated to runner ${otherRunner} / thread ${otherName || otherThread}` : `Delegated by runner ${otherRunner} / thread ${otherName || otherThread}`;
+				head.append(label, pill(task.status || "unknown"));
+				const meta = document.createElement("div");
+				meta.className = "task-meta";
+				const relation = document.createElement("span");
+				relation.append(document.createTextNode(`${sent ? "Sent" : "Received"} · task `), taskLink(task.taskId),
+					document.createTextNode(` · source runner ${task.sourceRunnerId || "unknown"} / thread `), threadLink(task.sourceThreadId),
+					document.createTextNode(` · target runner ${task.targetRunnerId || "unknown"} / thread `), threadLink(task.targetThreadId));
+				const time = document.createElement("span");
+				time.textContent = formatDate(task.updatedAt || task.createdAt);
+				meta.append(relation, time);
+				const body = document.createElement("div");
+				body.className = "task-body";
+				const prompt = document.createElement("details");
+				const promptLabel = document.createElement("summary");
+				promptLabel.textContent = "Delegated task";
+				const promptText = document.createElement("p");
+				promptText.textContent = task.prompt || "";
+				prompt.append(promptLabel, promptText);
+				body.append(prompt);
+				if (task.result) {
+					const report = document.createElement("p");
+					report.className = "task-report";
+					report.textContent = task.result.summary;
+					const delivery = document.createElement("strong");
+					delivery.textContent = task.notificationStatus === "delivered"
+						? "Receipt confirmed"
+						: task.notificationStatus === "pending" ? "Report submitted · delivery pending" : "Report submitted · delivery unknown";
+					body.prepend(report, delivery);
+				}
+				card.append(head, meta, body);
+				return card;
+			}
+			function threadLink(threadId) {
+				const link = document.createElement("a");
+				link.href = `/threads/${encodeURIComponent(threadId)}`;
+				link.textContent = threadId;
+				return link;
+			}
+			function taskLink(taskId) {
+				const link = document.createElement("a");
+				link.href = `#task-${encodeURIComponent(taskId)}`;
+				link.textContent = taskId;
+				return link;
 			}
 			async function loadHistory(retry = 0) {
 				const load = ++state.historyLoad;
@@ -1166,10 +1326,16 @@
 				if (load !== state.historyLoad) return;
 				const conversation = $("conversation");
 				conversation.replaceChildren();
-				for (const entry of entries) conversation.append(renderEntry(entry));
+				for (const entry of entries) {
+					if (!isCollaborationSessionEntry(entry)) conversation.append(renderEntry(entry)); // Task cards show these.
+				}
 				state.revision = page?.revision ?? revision;
 				state.historyCursor = null;
 				$("history-more").classList.add("hidden");
+			}
+			function isCollaborationSessionEntry(entry) {
+				const type = entry?.customType || entry?.message?.customType || entry?.data?.customType;
+				return type === "tower-collaboration-result" || type === "tower-collaboration-report";
 			}
 			function renderEntry(entry) {
 				const message = entry.message || entry;
@@ -1323,7 +1489,7 @@
 					state.reconnectTimer = setTimeout(async () => {
 						try {
 							state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
-							await loadHistory(true);
+							await Promise.all([loadHistory(true), loadTasks()]);
 							renderThreadState();
 							await reconcileCommands();
 							connect();
@@ -1380,7 +1546,7 @@
 					state.row.latestSnapshotRevision = data.revision;
 					state.live = null;
 					setLive("Checkpoint saved. Loading authoritative history.");
-					loadHistory(true)
+					Promise.all([loadHistory(true), loadTasks()])
 						.then(() => setLive(""))
 						.catch((error) => notice(error.message, "error"));
 					renderThreadState();
@@ -1388,6 +1554,10 @@
 				}
 				if (data.type === "command_status") {
 					showReceipt(data.receipt);
+					return;
+				}
+				if (data.type === "collaboration_changed" && data.threadId === state.row.threadId) {
+					loadTasks().catch((error) => notice(error.message, "error"));
 					return;
 				}
 				if (data.type === "resync_required") {
@@ -1438,7 +1608,7 @@
 				state.live = null;
 				try {
 					state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
-					await loadHistory(true);
+					await Promise.all([loadHistory(true), loadTasks()]);
 					renderThreadState();
 					renderDialogs(state.row.runtime?.pendingDialogs || []);
 					setLive(["running", "waiting_input"].includes(state.row.runtime?.state) ? "Work is still running. Some live text may not be saved yet." : "");
@@ -1679,7 +1849,7 @@
 						notice("A newer checkpoint is available. Reload the thread and confirm again.", "error");
 						state.row = await api(`/api/threads/${encodeURIComponent(state.row.threadId)}`);
 						renderThreadState();
-						await loadHistory(true);
+						await Promise.all([loadHistory(true), loadTasks()]);
 					} else notice(error.message, "error");
 				}
 			});

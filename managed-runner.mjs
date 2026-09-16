@@ -8,6 +8,7 @@ import { checkpoint, durableWrite, loadCheckpoint, privateDirectory, readJson, s
 import { CommandJournal, commandPayload } from "./managed-journal.mjs";
 import { parseEnvelope } from "./managed-snapshots.mjs";
 import { holdWriterLock } from "./managed-lock.mjs";
+import { collaborationText } from "./managed-collaboration-store.mjs";
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -34,6 +35,7 @@ export class ManagedRunner {
 		if (this.identity.version !== 1 || this.identity.runnerId !== id || this.identity.host !== hostname()) throw new Error("runner_identity_mismatch");
 		uuid(this.identity.instanceId);
 		this.threads = new Map(); // Threads this process hosts; several processes may share the data directory.
+		this.collaborationPending = new Map();
 		this.createSupported = false;
 	}
 
@@ -104,7 +106,10 @@ export class ManagedRunner {
 	}
 
 	inventory() {
-		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId, cwd: record.effectiveCwd, hostname: this.identity.host,
+		const awake = [...this.threads.values()].filter((entry) => entry.runtime).length;
+		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native, runtime }) => ({ threadId: record.threadId, workspaceId: record.workspaceId, cwd: record.effectiveCwd, hostname: this.identity.host,
+			metadataConflict: record.metadataConflict ?? null,
+			collaborationReady: existsSync(record.sessionFile) && (record.interactive ? !!native : (!!runtime || awake < this.maxAwake) && ["sleeping", "idle", "running", "waiting_input", "interrupted"].includes(state)),
 			registration: record.registration, inputReady: record.interactive ? !!native : undefined, queueSupported: !!native, queue: native?.queue() ?? [],
 			piSessionId: record.piSessionId, state, runId: activeCommand ?? null, pendingDialogs: [...dialogs.values()],
 			missingSession: !existsSync(record.sessionFile),
@@ -266,6 +271,107 @@ export class ManagedRunner {
 		return receipt;
 	}
 
+	taskFile(entry, taskId) { return resolve(entry.recordFile, `../task-${uuid(taskId)}.json`); }
+
+	observeName(entry, name = "") {
+		if (name === entry.record.localName) return;
+		if (typeof name !== "string" || name.length > 200) { entry.record.metadataConflict = "Local name exceeds 200 characters"; return; }
+		entry.record.localName = name;
+		entry.record.rename = { title: name, metadataVersion: entry.record.metadataVersion ?? 1 };
+		delete entry.record.metadataConflict;
+		durableWrite(entry.recordFile, entry.record);
+		void this.syncMetadata(entry);
+	}
+
+	async syncMetadata(entry) {
+		if (!this.reconciled || entry.quarantined || entry.metadataSyncing) return;
+		entry.metadataSyncing = true;
+		const rename = entry.record.metadataConflict ? null : entry.record.rename;
+		try {
+			const result = await this.callHQ(entry, "thread_metadata", rename ?? {});
+			entry.record.metadataVersion = result.metadataVersion;
+			if (rename && entry.record.rename === rename) delete entry.record.rename;
+			if (!entry.record.rename && !entry.record.metadataConflict) {
+				const changed = entry.record.localName !== result.title;
+				entry.record.localName = result.title;
+				if (entry.native && (entry.native.session.sessionManager.getSessionName() ?? "") !== result.title.trim()) entry.native.session.setSessionName(result.title);
+				else if (entry.runtime?.child.connected && changed) entry.runtime.child.send({ type: "metadata_name", name: result.title });
+			}
+			durableWrite(entry.recordFile, entry.record);
+		} catch (error) {
+			if (error.message === "metadata_conflict") {
+				entry.record.metadataConflict = "Name changed locally and in Tower. Rename again after reviewing both names.";
+				durableWrite(entry.recordFile, entry.record);
+				entry.native?.ui.notify(entry.record.metadataConflict, "warning");
+			}
+		} finally { entry.metadataSyncing = false; }
+	}
+
+	taskState(entry, task, status) {
+		const file = this.taskFile(entry, task.taskId);
+		const old = existsSync(file) ? readJson(file) : { task, started: false };
+		const next = { ...old, status, started: old.started || status === "running", bootId: this.bootId };
+		durableWrite(file, next);
+		if (status === "running" && entry.runtime) {
+			entry.state = "running"; entry.activeCommand = task.commandId; entry.record.runId = task.commandId;
+			durableWrite(entry.recordFile, entry.record);
+			this.emit?.({ type: "runtime_state", ...this.info(entry.record.threadId) });
+		}
+		if (this.reconciled) this.emit?.({ type: "collaboration_event", threadId: entry.record.threadId, connectionId: this.connectionId, taskId: task.taskId, status });
+	}
+
+	async collaborationTool(entry, operation, input) {
+		if (operation !== "thread_report") return this.callHQ(entry, operation, input);
+		const file = this.taskFile(entry, input.taskId);
+		if (!existsSync(file)) throw new Error("task_not_started");
+		const record = readJson(file);
+		if (!record.started || record.task.targetThreadId !== entry.record.threadId) throw new Error("task_not_started");
+		if (!["completed", "failed"].includes(input.outcome)) throw new Error("invalid_outcome");
+		const report = { taskId: input.taskId, outcome: input.outcome, summary: collaborationText(input.summary, "summary") };
+		if (record.report && JSON.stringify(record.report) !== JSON.stringify(report)) throw new Error("collaboration_result_conflict");
+		durableWrite(file, { ...record, report });
+		try {
+			const result = await this.callHQ(entry, operation, report);
+			durableWrite(file, { ...readJson(file), reportAck: true });
+			return result;
+		} catch (error) {
+			if (!/offline|unknown/.test(error.message)) throw error;
+			return { ...record.task, status: "unknown", reportSavedLocally: true, delivery: "pending", query: "thread_tasks" };
+		}
+	}
+
+	callHQ(entry, operation, input) {
+		if (!this.reconciled || this.ws?.readyState !== 1 || entry.quarantined) return Promise.reject(new Error("hq_offline"));
+		const requestId = randomUUID();
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => {
+				this.collaborationPending.delete(requestId);
+				if (operation === "thread_delegate") resolve({ status: "unknown", requestId: input.requestId, query: "thread_tasks with the same requestId; do not issue a new delegation" });
+				else reject(new Error("hq_timeout_unknown"));
+			}, 10_000);
+			this.collaborationPending.set(requestId, { resolve, reject, timer });
+			this.emit({ type: "collaboration_request", requestId, connectionId: this.connectionId, threadId: entry.record.threadId, operation, input });
+		});
+	}
+
+	async syncCollaboration(entry) {
+		if (!this.reconciled || entry.quarantined || entry.collaborationSyncing) return;
+		entry.collaborationSyncing = true;
+		try {
+			for (const name of readdirSync(resolve(entry.recordFile, ".."))) {
+				if (!/^task-[0-9a-f-]+\.json$/.test(name)) continue;
+				const file = resolve(entry.recordFile, "..", name), item = readJson(file);
+				if (item.started) this.emit({ type: "collaboration_event", threadId: entry.record.threadId, connectionId: this.connectionId, taskId: item.task.taskId, status: "running" });
+				if (item.status !== "running" || item.bootId !== this.bootId) this.emit({ type: "collaboration_event", threadId: entry.record.threadId, connectionId: this.connectionId, taskId: item.task.taskId, status: item.status === "rejected" ? "rejected" : "unknown" });
+				if (item.report) {
+					await this.callHQ(entry, "thread_report", item.report);
+					if (!item.reportAck) durableWrite(file, { ...readJson(file), reportAck: true });
+				}
+			}
+		} catch (error) { entry.collaborationError = error.message; }
+		finally { entry.collaborationSyncing = false; }
+	}
+
 	requireDriver(entry, epoch) {
 		if (!this.reconciled || entry.quarantined || !epoch || epoch.connectionId !== this.connectionId ||
 			JSON.stringify(epoch) !== JSON.stringify(entry.epoch)) throw new Error("stale_access");
@@ -325,12 +431,28 @@ export class ManagedRunner {
 		child.on("error", () => { entry.state = "error"; });
 		child.stdin.on("error", () => {}); // Exit rejects pending requests; the durable awake marker remains.
 		child.on("message", (message) => {
+			if (message.type === "session_name") this.observeName(entry, message.name);
+			if (message.type === "collaboration_request") {
+				void this.collaborationTool(entry, message.operation, message.input).then(
+					(result) => { if (child.connected) child.send({ type: "collaboration_response", requestId: message.requestId, result }); },
+					(error) => { if (child.connected) child.send({ type: "collaboration_response", requestId: message.requestId, error: error.message }); });
+			}
+			if (message.type === "collaboration_state") this.taskState(entry, message.task, message.status);
+			if (message.type === "collaboration_command_done") {
+				this.commandStatus(entry, message.commandId, message.status);
+				entry.state = "idle"; this.armIdle(entry);
+			}
+			if (message.type === "collaboration_notification_done") {
+				const pending = runtime.pending.get(message.requestId);
+				if (pending) { clearTimeout(pending.timer); runtime.pending.delete(message.requestId); message.error ? pending.reject(new Error(message.error)) : pending.resolve(message.result); }
+			}
 			if (message.type === "saved_shutdown") runtime.savedShutdown = true;
 			if (message.type === "checkpoint") {
 				if (message.settled !== false) {
 					entry.state = "idle";
 					entry.dialogs.clear();
-					if (entry.activeCommand) this.commandStatus(entry, entry.activeCommand, "settled");
+					// A delegated task's command ends through collaboration_command_done; settled would claim an outcome.
+					if (entry.activeCommand && !entry.journal.get(entry.activeCommand)?.payload.task) this.commandStatus(entry, entry.activeCommand, "settled");
 					for (const commandId of entry.dialogCommands ?? []) this.commandStatus(entry, commandId, "settled");
 					entry.dialogCommands = [];
 					this.armIdle(entry);
@@ -364,6 +486,7 @@ export class ManagedRunner {
 		});
 		runtime.ready = this.rpc(runtime, "get_state").then((state) => {
 			if (state.sessionId !== record.piSessionId) throw new Error("pi_session_mismatch");
+			if (record.localName !== undefined && record.localName.trim() !== (state.sessionName ?? "")) child.send({ type: "metadata_name", name: record.localName });
 			entry.state = "idle";
 			this.armIdle(entry);
 		});
@@ -430,6 +553,17 @@ export class ManagedRunner {
 			const saved = loadCheckpoint(entry.record.checkpointFile, entry.record.sessionFile, entry.record.piSessionId, entry.record.effectiveCwd);
 			return { entries: saved.entries, leafId: saved.leafId };
 		}
+		if (operation === "collaboration_notify") {
+			if (!this.reconciled || entry.quarantined || entry.syncError || entry.cloudCheck || input.task.sourceThreadId !== threadId) throw new Error("notification_unavailable");
+			if (entry.native) return entry.native.notify(input.task);
+			if (!entry.runtime) throw new Error("notification_runtime_offline");
+			const requestId = randomUUID(), runtime = entry.runtime;
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(() => { runtime.pending.delete(requestId); reject(new Error("notification_timeout_unknown")); }, 15_000);
+				runtime.pending.set(requestId, { resolve, reject, timer });
+				runtime.child.send({ type: "collaboration_notify", requestId, task: input.task });
+			});
+		}
 		this.requireDriver(entry, input.epoch);
 		const payload = commandPayload(input);
 		uuid(commandId);
@@ -437,6 +571,7 @@ export class ManagedRunner {
 		const receipt = entry.journal.receive(commandId, payload, input.epoch);
 		if (previous) return receipt;
 		try {
+			if (input.task && (input.task.targetThreadId !== threadId || input.task.targetRunnerInstanceId !== this.identity.instanceId)) throw new Error("task_binding_mismatch");
 			if (entry.native) {
 				this.commandStatus(entry, commandId, "dispatching");
 				await entry.native.command(input);
@@ -446,6 +581,14 @@ export class ManagedRunner {
 				if (entry.syncError) throw new Error("sync_error");
 				if (entry.cloudCheck) throw new Error("sync_reconciling");
 				if (entry.state === "stopping") await entry.runtime.exited;
+				if (input.task) { // The child queues tasks behind whatever is running; busy is not a rejection.
+					const runtime = await this.open(entry);
+					this.requireDriver(entry, input.epoch);
+					clearTimeout(entry.idle);
+					this.commandStatus(entry, commandId, "accepted");
+					runtime.child.send({ type: "collaboration_task", task: input.task });
+					return entry.journal.get(commandId);
+				}
 				if (!["sleeping", "idle", "interrupted"].includes(entry.state)) throw new Error("runtime_busy");
 				clearTimeout(entry.idle);
 				const runtime = await this.open(entry);
@@ -487,7 +630,7 @@ export class ManagedRunner {
 	connect({ hq, token }) {
 		this.httpUrl = hq.replace(/^ws/, "http");
 		this.token = token;
-		this.syncTimer = setInterval(() => { for (const entry of this.threads.values()) void this.syncSnapshot(entry); }, 5000);
+		this.syncTimer = setInterval(() => { for (const entry of this.threads.values()) { void this.syncSnapshot(entry); void this.syncCollaboration(entry); void this.syncMetadata(entry); } }, 5000);
 		const dial = () => {
 			if (this.stopping) return;
 			const ws = new WebSocket(`${hq}/managed/runner?id=${encodeURIComponent(this.id)}&instance=${this.identity.instanceId}&boot=${this.bootId}`, { headers: { authorization: `Bearer ${token}` } });
@@ -497,6 +640,11 @@ export class ManagedRunner {
 				let envelope;
 				try {
 					envelope = JSON.parse(data);
+					if (envelope.type === "collaboration_response") {
+						const pending = this.collaborationPending.get(envelope.requestId);
+						if (pending) { clearTimeout(pending.timer); this.collaborationPending.delete(envelope.requestId); envelope.error ? pending.reject(new Error(envelope.error)) : pending.resolve(envelope.result); }
+						return;
+					}
 					if (envelope.type === "welcome") { this.connectionId = uuid(envelope.connectionId); this.announce(); return; }
 					if (envelope.type === "inventory_ready" && envelope.connectionId === this.connectionId) {
 						for (const entry of this.threads.values()) {
@@ -523,6 +671,8 @@ export class ManagedRunner {
 							const pendingHash = entry.sync.pending && createHash("sha256").update(entry.sync.pending.bytes).digest("hex");
 							entry.cloudCheck = (head?.hash ?? null) !== (entry.sync.ack?.hash ?? null) && head?.hash !== pendingHash;
 							void this.syncSnapshot(entry);
+							void this.syncCollaboration(entry);
+							void this.syncMetadata(entry);
 						}
 						return;
 					}
@@ -537,6 +687,8 @@ export class ManagedRunner {
 				}
 			};
 			ws.onclose = () => {
+				for (const pending of this.collaborationPending.values()) { clearTimeout(pending.timer); pending.reject(new Error("hq_disconnected_unknown")); }
+				this.collaborationPending.clear();
 				this.connectionId = null;
 				this.reconciled = false;
 				for (const entry of this.threads.values()) { entry.driver = false; entry.epoch = null; this.armIdle(entry); }
