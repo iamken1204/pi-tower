@@ -361,7 +361,7 @@
 
 		.metrics {
 			display: grid;
-			grid-template-columns: repeat(4, 1fr);
+			grid-template-columns: repeat(2, 1fr);
 			margin: 0;
 			border-bottom: 1px solid var(--line);
 		}
@@ -622,7 +622,7 @@
 
 		.runner-stats {
 			display: grid;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 			border-top: 1px solid var(--line);
 		}
 
@@ -797,7 +797,16 @@
 		}
 
 		.state[data-state="attached"]::before { background: var(--green); }
+		.state[data-state="running"]::before { background: var(--green); }
 		.state[data-state="opening"]::before { background: var(--yellow); }
+		.state[data-state="waiting_input"]::before { background: var(--yellow); }
+
+		a.session-close {
+			display: inline-flex;
+			align-items: center;
+			color: inherit;
+			text-decoration: none;
+		}
 
 		.runner-session-empty {
 			min-height: 0;
@@ -838,9 +847,6 @@
 		}
 
 		@media (max-width: 900px) {
-			.metrics { grid-template-columns: repeat(2, 1fr); }
-			.metric:nth-child(2) { border-right: 0; }
-			.metric:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
 			.directory-heading { grid-template-columns: 5rem minmax(0, 1fr) auto; }
 			.directory-heading .section-code { grid-row: 1 / 3; }
 			.filter-field { grid-column: 2 / 4; border-top: 1px solid var(--line); border-left: 0; }
@@ -938,16 +944,8 @@
 					<dd id="runner-count">00</dd>
 				</div>
 				<div class="metric">
-					<dt>Total sessions</dt>
-					<dd id="session-count">00</dd>
-				</div>
-				<div class="metric">
-					<dt>Attached clients</dt>
-					<dd id="attached-count">00</dd>
-				</div>
-				<div class="metric">
-					<dt>Opening now</dt>
-					<dd id="opening-count">00</dd>
+					<dt>Active threads</dt>
+					<dd id="thread-count">00</dd>
 				</div>
 			</dl>
 
@@ -960,7 +958,7 @@
 					</div>
 					<div class="filter-field">
 						<label for="runner-filter">Filter</label>
-						<input id="runner-filter" type="search" maxlength="100" placeholder="Fuzzy match runner or session" disabled>
+						<input id="runner-filter" type="search" maxlength="100" placeholder="Fuzzy match runner or thread" disabled>
 					</div>
 					<button class="secondary-button" id="refresh-button" type="button" disabled>Refresh now</button>
 				</header>
@@ -969,7 +967,7 @@
 						<span class="empty-code">R–000</span>
 						<div class="empty-copy">
 							<strong>Waiting for connection</strong>
-							<p>Enter the configured tower token above. Connected runners and their sessions will appear here.</p>
+							<p>Enter the configured tower token above. Connected runners and their threads will appear here.</p>
 						</div>
 					</div>
 				</div>
@@ -978,7 +976,7 @@
 
 		<footer>
 			<span>π/T</span>
-			<p>Live operational state for Pi Tower runners and sessions.</p>
+			<p>Live operational state for Pi Tower runners and threads.</p>
 			<span class="footer-build">PI-TOWER STATE / UI REV. 03</span>
 		</footer>
 	</div>
@@ -997,9 +995,7 @@
 		const container = document.querySelector("#runners");
 		const counts = {
 			runners: document.querySelector("#runner-count"),
-			sessions: document.querySelector("#session-count"),
-			attached: document.querySelector("#attached-count"),
-			opening: document.querySelector("#opening-count"),
+			threads: document.querySelector("#thread-count"),
 		};
 		const authFailed = new URLSearchParams(location.search).get("auth") === "failed";
 		let timer;
@@ -1012,6 +1008,14 @@
 		let collapsingSessionsAnimation = null;
 
 		const padCount = (value) => String(value).padStart(2, "0");
+		const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+		// Rows under a runner are active threads plus, on legacy relay runners, live pi sessions.
+		const threadCount = (sessions) => sessions.filter((session) => session.managed).length;
+		const rowsLabel = (sessions) => {
+			const threads = threadCount(sessions);
+			const legacy = sessions.length - threads;
+			return [threads && plural(threads, "thread"), legacy && plural(legacy, "session")].filter(Boolean).join(", ");
+		};
 		const dateTime = (value) => new Intl.DateTimeFormat(undefined, {
 			year: "numeric",
 			month: "short",
@@ -1045,11 +1049,8 @@
 		}
 
 		function setCounts(runners = []) {
-			const sessions = runners.flatMap((runner) => runner.sessions);
 			counts.runners.textContent = padCount(runners.length);
-			counts.sessions.textContent = padCount(sessions.length);
-			counts.attached.textContent = padCount(sessions.filter((session) => session.state === "attached").length);
-			counts.opening.textContent = padCount(sessions.filter((session) => session.state === "opening").length);
+			counts.threads.textContent = padCount(threadCount(runners.flatMap((runner) => runner.sessions)));
 		}
 
 		function renderEmpty(title, message, code = "R–000") {
@@ -1197,7 +1198,7 @@
 			sessions.id = `runner-sessions-${runnerIndex}`;
 			sessions.dataset.runnerId = runner.id;
 			sessions.tabIndex = 0;
-			sessions.setAttribute("aria-label", `Sessions on ${runner.id}. Activate to collapse`);
+			sessions.setAttribute("aria-label", `Threads on ${runner.id}. Activate to collapse`);
 
 			const runnerSummary = document.createElement("div");
 			runnerSummary.className = "runner-sessions-runner";
@@ -1213,29 +1214,32 @@
 
 			const header = document.createElement("div");
 			header.className = "runner-sessions-header";
+			const threads = threadCount(runner.sessions);
+			const legacy = runner.sessions.length - threads;
 			const title = document.createElement("span");
-			title.textContent = "Sessions";
+			title.textContent = legacy ? "Threads + sessions" : "Threads";
 			const count = document.createElement("span");
-			count.textContent = padCount(runner.sessions.length);
+			count.textContent = legacy ? `${padCount(threads)} + ${padCount(legacy)}` : padCount(threads);
 			header.append(title, count);
 			sessions.append(header);
 
 			if (!runner.sessions.length) {
 				const empty = document.createElement("p");
 				empty.className = "runner-session-empty";
-				empty.textContent = "No sessions · control connection ready";
+				empty.textContent = runner.managed ? "No active threads" : "No sessions";
 				sessions.append(empty);
 				return sessions;
 			}
 
 			const list = document.createElement("ol");
 			list.className = "runner-session-list";
-			runner.sessions.forEach((session, sessionIndex) => {
+			let threadIndex = 0, legacyIndex = 0;
+			for (const session of runner.sessions) {
 				const row = document.createElement("li");
 				row.className = "runner-session";
 				const index = document.createElement("span");
 				index.className = "runner-session-index";
-				index.textContent = `S${padCount(sessionIndex + 1)}`;
+				index.textContent = session.managed ? `T${padCount(++threadIndex)}` : `S${padCount(++legacyIndex)}`;
 				const name = document.createElement("span");
 				name.className = "session-name";
 				name.textContent = session.name;
@@ -1244,6 +1248,17 @@
 				state.className = "state";
 				state.dataset.state = session.state;
 				state.textContent = session.state;
+				if (session.managed) {
+					const open = document.createElement("a");
+					open.className = "secondary-button session-close";
+					open.href = `/threads/${encodeURIComponent(session.threadId)}`;
+					open.textContent = "Open";
+					open.title = `Open thread ${session.name}`;
+					open.addEventListener("click", (event) => event.stopPropagation());
+					row.append(index, name, state, open);
+					list.append(row);
+					continue;
+				}
 				const close = document.createElement("button");
 				close.className = "secondary-button session-close";
 				close.type = "button";
@@ -1261,7 +1276,7 @@
 				});
 				row.append(index, name, state, close);
 				list.append(row);
-			});
+			}
 			sessions.append(list);
 			return sessions;
 		}
@@ -1299,10 +1314,10 @@
 		}
 
 		function createRunnerCard(runner, runnerIndex, isSelected) {
-			const attached = runner.sessions.filter((session) => session.state === "attached").length;
-			const opening = runner.sessions.filter((session) => session.state === "opening").length;
-			const sessionLabel = `${runner.sessions.length} session${runner.sessions.length === 1 ? "" : "s"}`;
+			const threads = threadCount(runner.sessions);
+			const label = rowsLabel(runner.sessions);
 			const canExpand = runner.sessions.length > 0;
+			const nothing = runner.managed ? "No active threads" : "No sessions";
 			const card = document.createElement("article");
 			card.className = "runner-card";
 			card.dataset.expanded = String(isSelected);
@@ -1317,9 +1332,9 @@
 			if (canExpand && isSelected) block.setAttribute("aria-controls", `runner-sessions-${runnerIndex}`);
 			block.setAttribute("aria-label", canExpand
 				? isSelected
-					? `Selected runner ${runner.id}, showing ${sessionLabel}`
-					: `Select runner ${runner.id} to show ${sessionLabel}`
-				: `Runner ${runner.id} has no sessions`);
+					? `Selected runner ${runner.id}, showing ${label}`
+					: `Select runner ${runner.id} to show ${label}`
+				: `Runner ${runner.id}: ${nothing.toLowerCase()}`);
 
 			const top = document.createElement("span");
 			top.className = "runner-block-top";
@@ -1354,23 +1369,16 @@
 			const action = document.createElement("span");
 			action.className = "runner-action";
 			action.textContent = canExpand
-				? isSelected ? `${sessionLabel} shown` : `View ${sessionLabel} ↓`
-				: "No sessions";
+				? isSelected ? `${label} shown` : `View ${label} ↓`
+				: nothing;
 			identity.append(title, action);
 
-			const sessionsStat = createRunnerStat(
-				"Sessions",
-				String(runner.sessions.length),
-				canExpand,
-			);
+			const sessionsStat = runner.managed
+				? createRunnerStat("Threads", String(threads), canExpand)
+				: createRunnerStat("Sessions", String(runner.sessions.length), canExpand);
 			const stats = document.createElement("span");
 			stats.className = "runner-stats";
-			stats.append(
-				createRunnerStat("Uptime", elapsed(runner.connectedAt)),
-				sessionsStat,
-				createRunnerStat("Attached", String(attached)),
-				createRunnerStat("Opening", String(opening)),
-			);
+			stats.append(createRunnerStat("Uptime", elapsed(runner.connectedAt)), sessionsStat);
 			block.append(top, identity, stats);
 			let emptySessionsAnimation;
 			block.addEventListener("click", () => {
@@ -1460,10 +1468,10 @@
 			latestData = data;
 			setCounts(data.runners);
 			renderDirectory(data);
-			const sessionTotal = data.runners.reduce((total, runner) => total + runner.sessions.length, 0);
+			const rows = rowsLabel(data.runners.flatMap((runner) => runner.sessions));
 			setStatus(
 				data.runners.length
-					? `${data.runners.length} runner${data.runners.length === 1 ? "" : "s"} online with ${sessionTotal} session${sessionTotal === 1 ? "" : "s"}.`
+					? `${plural(data.runners.length, "runner")} online${rows ? `, ${rows.replace(/thread(s?)\b/, "active thread$1")}` : ", no active threads"}.`
 					: "Connected. No runners are online.",
 				"success",
 			);
@@ -1490,7 +1498,7 @@
 					resultsNote.textContent = "Connect to view available runners.";
 					renderEmpty(
 						authFailed ? "Access denied" : "Authentication required",
-						"Enter the tower's configured access token to view runners and sessions.",
+						"Enter the tower's configured access token to view runners and threads.",
 						authFailed ? "E–401" : "R–000",
 					);
 					authDetails.open = true;

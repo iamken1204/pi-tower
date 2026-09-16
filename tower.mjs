@@ -62,7 +62,7 @@ function parseArgs(argv) {
 }
 
 export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions }) {
-	const managed = dataDir ? createManagedTower(dataDir, managedOptions) : null;
+	const managed = dataDir ? createManagedTower(dataDir, { ...managedOptions, onPresence: () => broadcastSnapshot() }) : null;
 	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
@@ -104,10 +104,14 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 
 	const listing = () =>
 		[...runners.entries()].map(([id, r]) => ({ id, connectedAt: r.connectedAt, sessions: r.sessions.size }));
-	const snapshot = () => ({
-		runners: [...runners.entries()].map(([id, runner]) => ({
+	// Managed-only runners (interactive mode) never open the legacy control socket, so their presence
+	// and active threads are merged in here.
+	const snapshot = () => {
+		const managedRunners = new Map((managed?.presence() ?? []).map((runner) => [runner.id, runner]));
+		const list = [...runners.entries()].map(([id, runner]) => ({
 			id,
 			connectedAt: runner.connectedAt,
+			managed: managedRunners.has(id),
 			sessions: [
 				...[...runner.sessions.entries()].map(([name, session]) => ({
 					name,
@@ -116,9 +120,14 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 				...[...pending.keys()]
 					.filter((key) => key.startsWith(`${id}/`))
 					.map((key) => ({ name: key.slice(id.length + 1), state: "opening" })),
+				...(managedRunners.get(id)?.sessions ?? []),
 			],
-		})),
-	});
+		}));
+		for (const runner of managedRunners.values()) {
+			if (!runners.has(runner.id)) list.push({ id: runner.id, connectedAt: runner.connectedAt, managed: true, sessions: runner.sessions });
+		}
+		return { runners: list };
+	};
 	const uiStreams = new Set();
 	const broadcastSnapshot = () => {
 		const event = `data: ${JSON.stringify(snapshot())}\n\n`;

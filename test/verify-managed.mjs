@@ -90,6 +90,42 @@ try {
 	assert.equal((await once(legacy, "close"))[0].reason, "managed_namespace");
 	const duplicateRegistration = new WebSocket(`ws://127.0.0.1:${port}/managed/runner?id=managed-test&instance=${randomUUID()}&boot=${randomUUID()}`, { headers: { authorization: `Bearer ${token}` } });
 	assert.equal((await once(duplicateRegistration, "close"))[0].reason, "duplicate_runner");
+	// A runner that only speaks the managed protocol (interactive mode) must still show on the home page.
+	// connection: close keeps these out of the keep-alive pool, which the tower restart below would otherwise reset.
+	const state = () => fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
+	const events = await fetch(`http://127.0.0.1:${port}/api/events`, { headers: { authorization: `Bearer ${token}` } });
+	const sse = events.body.getReader();
+	let sseText = "";
+	const nextEvent = (label) => Promise.race([(async () => {
+		for (;;) {
+			while (!sseText.includes("\n\n")) sseText += new TextDecoder().decode((await sse.read()).value);
+			const cut = sseText.indexOf("\n\n");
+			const data = sseText.slice(0, cut).split("\n").find((line) => line.startsWith("data: "));
+			sseText = sseText.slice(cut + 2);
+			if (data) return JSON.parse(data.slice(6));
+		}
+	})(), pause(5000).then(() => { throw new Error(`timeout: ${label}`); })]);
+	assert.deepEqual((await nextEvent("initial SSE snapshot")).runners.map((item) => item.id), ["managed-test"]);
+	const managedOnly = new WebSocket(`ws://127.0.0.1:${port}/managed/runner?id=managed-only&instance=${randomUUID()}&boot=${randomUUID()}`, { headers: { authorization: `Bearer ${token}` } });
+	sockets.add(managedOnly);
+	const confirmed = new Promise((resolve) => { managedOnly.onmessage = ({ data }) => {
+		const frame = JSON.parse(data);
+		if (frame.type === "welcome") managedOnly.send(JSON.stringify({ version: 1, type: "inventory", piVersion: "0.85.1", threads: [] }));
+		if (frame.type === "inventory_ready") managedOnly.send(JSON.stringify({ version: 1, type: "reconciled", connectionId: frame.connectionId }));
+		if (frame.type === "inventory_confirmed") resolve();
+	}; });
+	await confirmed;
+	// Runtime state changes also broadcast, so read until the registration shows up.
+	for (let i = 0; !(await nextEvent("SSE announces the managed-only runner")).runners.some((item) => item.id === "managed-only"); i++) assert.ok(i < 20, "SSE never announced the managed-only runner");
+	const listed = (await state()).runners;
+	assert.deepEqual(listed.map(({ id, managed, sessions }) => ({ id, managed, sessions })),
+		[{ id: "managed-test", managed: true, sessions: [] }, { id: "managed-only", managed: true, sessions: [] }]);
+	assert.ok(listed.every((item) => Number.isFinite(Date.parse(item.connectedAt))));
+	const legacyListing = await fetch(`http://127.0.0.1:${port}/runners`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
+	assert.deepEqual(legacyListing.map((item) => item.id), ["managed-test"], "legacy /runners contract unchanged");
+	managedOnly.close(); sockets.delete(managedOnly);
+	await until(async () => !(await state()).runners.some((item) => item.id === "managed-only"), "managed-only runner leaves the home page");
+	await sse.cancel();
 	assert.equal((await fetch(`http://127.0.0.1:${port}/api/threads`)).status, 401);
 	let client = await attach(id);
 	assert.deepEqual(await client.request("entries"), { entries: [], leafId: null });
@@ -110,6 +146,10 @@ try {
 	await until(async () => (await client.request("state")).state === "idle", "settled");
 	const before = await client.request("entries");
 	await until(async () => (await client.request("state")).sync === "synced", "first snapshot committed");
+	const activeList = () => fetch(`http://127.0.0.1:${port}/api/threads?active=true`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
+	// The runner reports idle before its runtime_state frame reaches the tower, so poll rather than assert once.
+	await until(async () => JSON.stringify((await state()).runners.find((item) => item.id === "managed-test").sessions) === JSON.stringify([{ name: "測試", threadId: id, state: "idle", managed: true }]), "an awake thread is a home page session");
+	assert.deepEqual((await activeList()).threads.map((row) => row.threadId), [id]);
 	assert.deepEqual((await history(id)).entries, before.entries);
 	assert.equal((await client.request("prompt", { message: "first", commandId: firstCommand })).status, "settled");
 	assert.equal((await client.request("prompt", { message: "changed", commandId: firstCommand }, true)).error, "command_payload_conflict");
@@ -123,6 +163,9 @@ try {
 	await pause(700);
 	client = await attach(id);
 	await until(async () => (await client.request("state")).state === "sleeping", "TTL sleep");
+	await until(async () => (await state()).runners.find((item) => item.id === "managed-test").sessions.length === 0, "a sleeping thread leaves the home page");
+	assert.deepEqual((await activeList()).threads, [], "a sleeping thread is inactive");
+	assert.equal((await fetch(`http://127.0.0.1:${port}/api/threads`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json())).threads.length, 1, "the unfiltered list keeps it");
 	assert.deepEqual(await client.request("entries"), before);
 	close(client);
 	await stop(r);

@@ -776,6 +776,7 @@
 								aria-label="Filter by runner"
 							>
 								<option value="">All runners</option></select
+							><label class="archive-toggle"><input id="inactive" type="checkbox" /> Inactive</label
 							><label class="archive-toggle"><input id="archived" type="checkbox" /> Archived</label>
 						</form>
 						<div class="list-actions">
@@ -786,7 +787,7 @@
 					<ul id="thread-list" class="thread-list"></ul>
 					<div id="empty" class="empty hidden">
 						<h2>No threads found</h2>
-						<p>Choose an online runner to start a managed thread, or change the current filters.</p>
+						<p>Choose an online runner to start a managed thread, or show inactive or archived threads.</p>
 					</div>
 					<button id="more" class="button load-more hidden" type="button">Load more</button>
 				</section>
@@ -954,6 +955,7 @@
 				$("list-view").classList.remove("hidden");
 				$("thread-view").classList.add("hidden");
 				const params = new URLSearchParams({ archived: String($("archived").checked), limit: "50" });
+				if (!$("inactive").checked && !$("archived").checked) params.set("active", "true");
 				if ($("runner-filter").value) params.set("runner", $("runner-filter").value);
 				if ($("search").value.trim()) params.set("q", $("search").value.trim());
 				if (append && state.cursor) params.set("cursor", state.cursor);
@@ -1581,7 +1583,7 @@
 			$("runner-filter").addEventListener("change", () =>
 				loadThreads(false).catch((error) => notice(error.message, "error")),
 			);
-			$("archived").addEventListener("change", () =>
+			for (const toggle of ["inactive", "archived"]) $(toggle).addEventListener("change", () =>
 				loadThreads(false).catch((error) => notice(error.message, "error")),
 			);
 			$("refresh-list").addEventListener("click", () =>

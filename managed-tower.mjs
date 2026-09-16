@@ -7,12 +7,16 @@ import { privateDirectory, uuid } from "./managed-storage.mjs";
 import { createSnapshotStore } from "./managed-snapshots.mjs";
 import { commandPayload, payloadHash } from "./managed-journal.mjs";
 
+// Runtime states with a live pi process; sleeping, interrupted and error threads are inactive.
+const AWAKE = new Set(["starting", "idle", "running", "waiting_input", "stopping"]);
+
 export function createManagedTower(dataDir, {
 	maxSnapshotBytes = Number(process.env.PI_TOWER_MAX_SNAPSHOT_BYTES ?? 64 * 1024 * 1024),
 	maxTotalBytes = Number(process.env.PI_TOWER_MAX_SNAPSHOT_TOTAL_BYTES ?? 1024 * 1024 * 1024),
 	minFreeBytes = Number(process.env.PI_TOWER_MIN_FREE_BYTES ?? 256 * 1024 * 1024),
 	maxUploads = Number(process.env.PI_TOWER_MAX_UPLOADS ?? 2),
 	maxViewerBuffer = Number(process.env.PI_TOWER_VIEWER_BUFFER_BYTES ?? 1024 * 1024),
+	onPresence = () => {}, // Fires when a runner's readiness or a thread's runtime state changes.
 } = {}) {
 	for (const value of [maxSnapshotBytes, maxTotalBytes, minFreeBytes, maxUploads, maxViewerBuffer]) if (!Number.isSafeInteger(value) || value < 1) throw new Error("invalid_managed_limit");
 	privateDirectory(dataDir);
@@ -64,7 +68,8 @@ export function createManagedTower(dataDir, {
 		if (!row) throw new Error("unknown_thread");
 		return row;
 	};
-	const describe = (row) => ({ ...row, online: !!runners.get(row.runnerId)?.ready,
+	const isActive = (row) => !row.archivedAt && !!runners.get(row.runnerId)?.ready && AWAKE.has(liveStates.get(row.threadId)?.state);
+	const describe = (row) => ({ ...row, online: !!runners.get(row.runnerId)?.ready, active: isActive(row),
 		runtime: liveStates.get(row.threadId) ?? { state: "sleeping", sync: "pending" },
 		latestSnapshotRevision: snapshots.head(row.threadId)?.revision ?? null });
 	const send = (ws, value) => {
@@ -160,7 +165,7 @@ export function createManagedTower(dataDir, {
 			if (known && known.instanceId !== instanceId) throw new Error("runner_instance_mismatch");
 			db.prepare("INSERT OR IGNORE INTO managed_runners VALUES (?,?)").run(id, instanceId);
 		} catch (error) { ws.close(1008, error.message); return; }
-		const runner = { ws, instanceId, bootId: params.get("boot"), ready: false, connectionId: randomUUID(), pending: new Map() };
+		const runner = { ws, instanceId, bootId: params.get("boot"), ready: false, connectedAt: new Date().toISOString(), connectionId: randomUUID(), pending: new Map() };
 		runners.set(id, runner);
 		send(ws, { type: "welcome", connectionId: runner.connectionId });
 		ws.on("message", (bytes) => {
@@ -195,6 +200,7 @@ export function createManagedTower(dataDir, {
 				} else if (message.type === "reconciled") {
 					if (!runner.inventory || message.connectionId !== runner.connectionId) throw new Error("invalid_reconciliation");
 					runner.ready = true;
+					onPresence();
 					send(ws, { type: "inventory_confirmed", connectionId: runner.connectionId, quarantined: [...runner.orphans], heads: runner.inventory.map((item) => ({ threadId: item.threadId, head: snapshots.head(item.threadId) })) });
 					for (const item of runner.inventory) broadcast(item.threadId, { type: "state", thread: describe(thread(item.threadId)), runtime: item, online: true });
 					for (const item of runner.inventory) if (clients.has(item.threadId)) void ensureAccess(thread(item.threadId)).catch(() => {});
@@ -203,7 +209,12 @@ export function createManagedTower(dataDir, {
 					const row = thread(message.threadId);
 					if (row.runnerId !== id || row.runnerInstanceId !== instanceId) throw new Error("event_binding_mismatch");
 					if (message.type === "command_status") saveReceipt(row.threadId, message.receipt);
-					else { liveStates.set(row.threadId, message); broadcast(row.threadId, { type: "state", thread: describe(row), runtime: message, online: true }); }
+					else {
+						const before = liveStates.get(row.threadId)?.state;
+						liveStates.set(row.threadId, message);
+						broadcast(row.threadId, { type: "state", thread: describe(row), runtime: message, online: true });
+						if (before !== message.state) onPresence();
+					}
 				} else if (message.type === "result") {
 					const p = runner.pending.get(message.requestId);
 					if (!p) return;
@@ -221,6 +232,7 @@ export function createManagedTower(dataDir, {
 		ws.on("close", () => {
 			if (runners.get(id) !== runner) return;
 			runners.delete(id);
+			if (runner.ready) onPresence();
 			for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("runner_disconnected_unknown")); }
 			for (const threadId of clients.keys()) if (thread(threadId).runnerId === id) {
 				accesses.delete(threadId); accessChanged(threadId);
@@ -318,11 +330,15 @@ export function createManagedTower(dataDir, {
 				if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_page_limit");
 				const cursor = url.searchParams.has("cursor") ? JSON.parse(Buffer.from(url.searchParams.get("cursor"), "base64url").toString()) : null;
 				if (cursor && (typeof cursor.updatedAt !== "string" || !uuid(cursor.threadId))) throw new Error("invalid_cursor");
+				const readyRunners = [...runners.entries()].filter(([, runner]) => runner.ready).map(([id]) => id);
+				const awakeThreads = [...liveStates.entries()].filter(([, runtime]) => AWAKE.has(runtime.state)).map(([threadId]) => threadId);
 				const rows = db.prepare(`SELECT threadId FROM threads WHERE (archivedAt IS NOT NULL)=? AND (?='' OR runnerId=?)
 					AND instr(lower(title),lower(?))>0 AND (? IS NULL OR updatedAt<? OR (updatedAt=? AND threadId<?))
+					AND (?=0 OR (archivedAt IS NULL AND runnerId IN (SELECT value FROM json_each(?)) AND threadId IN (SELECT value FROM json_each(?))))
 					ORDER BY updatedAt DESC,threadId DESC LIMIT ?`).all(url.searchParams.get("archived") === "true" ? 1 : 0,
 					url.searchParams.get("runner") ?? "", url.searchParams.get("runner") ?? "", url.searchParams.get("q") ?? "",
-					cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.threadId ?? null, limit + 1);
+					cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.threadId ?? null,
+					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(readyRunners), JSON.stringify(awakeThreads), limit + 1);
 				const page = rows.slice(0, limit).map(({ threadId }) => describe(thread(threadId)));
 				const last = page.at(-1);
 				res.end(JSON.stringify({ threads: page, nextCursor: rows.length > limit ? Buffer.from(JSON.stringify({ updatedAt: last.updatedAt, threadId: last.threadId })).toString("base64url") : null }));
@@ -396,6 +412,13 @@ export function createManagedTower(dataDir, {
 		}
 	}
 	return { http, isManagedSession: (name) => !!db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(name),
+		// Active threads double as the runner's sessions on the home page.
+		presence: () => [...runners.entries()].filter(([, runner]) => runner.ready).map(([id, runner]) => ({ id, connectedAt: runner.connectedAt,
+			sessions: db.prepare("SELECT threadId, runnerId, title, archivedAt FROM threads WHERE runnerId=? AND archivedAt IS NULL ORDER BY updatedAt DESC, threadId DESC").all(id)
+				.filter(isActive).map((row) => {
+					const state = liveStates.get(row.threadId).state;
+					return { name: row.title || row.threadId, threadId: row.threadId, state: state === "starting" ? "opening" : state, managed: true };
+				}) })),
 		routes: { "/managed/runner": handleRunner, "/managed/client": handleClient },
 		close() {
 			clearInterval(checkpointTimer);

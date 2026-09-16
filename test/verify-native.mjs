@@ -63,6 +63,7 @@ try {
 	tmux("set-option", "remain-on-exit", "on");
 	let id;
 	await until(async () => { id = (await api("/api/threads")).threads?.[0]?.threadId; return id; }, "local thread registers");
+	await until(async () => (await api("/api/state")).runners.some((item) => item.id === "native-test" && item.managed && item.sessions.some((session) => session.threadId === id)), "home page lists the interactive runner and its thread");
 	const a = await attach(id), b = await attach(id);
 	assert.deepEqual(a.epoch, b.epoch);
 	send("/fixture-custom");
@@ -130,6 +131,8 @@ try {
 	assert.equal((await c.request("state")).inputReady, false);
 	await c.request("prompt", { message: "must not restart old native" }, "start_thread_in_local_terminal");
 	const nextId = (await api("/api/threads")).threads.find((t) => t.threadId !== id).threadId;
+	await until(async () => (await api("/api/threads?active=true")).threads.map((t) => t.threadId).join() === nextId, "only the current native thread is active");
+	await until(async () => { const sessions = (await api("/api/state")).runners.find((item) => item.id === "native-test").sessions; return sessions.length === 1 && sessions[0].threadId === nextId; }, "home page follows the native session switch");
 	const d = await attach(nextId);
 	await d.request("prompt", { message: "new-native-67" });
 	await until(async () => { const s = await d.request("state"); return s.state === "idle" && s.sync === "synced"; }, "new session usable");

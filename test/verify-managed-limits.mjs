@@ -20,14 +20,14 @@ class Socket extends EventEmitter {
 }
 const dir = mkdtempSync(resolve(tmpdir(), "pi-managed-limits-"));
 const threadId = randomUUID(), instanceId = randomUUID(), sessionId = randomUUID(), workspaceId = randomUUID();
-let tower;
+let tower, fixtureRunner;
 function open(options = {}) {
 	tower = createManagedTower(dir, { maxSnapshotBytes: 2048, maxTotalBytes: 4096, minFreeBytes: 1, maxUploads: 1, maxViewerBuffer: 1024, ...options });
 	const db = new Database(resolve(dir, "tower.sqlite"));
 	db.prepare(`INSERT OR IGNORE INTO threads(threadId,createKey,runnerId,runnerInstanceId,title,createdAt,workspaceId,piSessionId,updatedAt,createTitle)
 		VALUES (?,?,?,?,?,?,?,?,?,?)`).run(threadId, randomUUID(), "fixture", instanceId, "limits", "2026-09-14", workspaceId, sessionId, "2026-09-14", "limits");
 	db.close();
-	const runner = new Socket();
+	const runner = new Socket(); fixtureRunner = runner;
 	tower.routes["/managed/runner"](runner, new URLSearchParams({ id: "fixture", instance: instanceId, boot: randomUUID() }));
 	const connectionId = runner.frames[0].connectionId;
 	runner.message({ type: "inventory", piVersion: "0.85.1", threads: [{ threadId, piSessionId: sessionId, workspaceId, state: "sleeping" }] });
@@ -43,7 +43,9 @@ function call(path, method, headers, body, unfinished = false) {
 	return { req, res, done };
 }
 try {
-	let headers = open();
+	let presenceChanges = 0;
+	let headers = open({ onPresence: () => presenceChanges++ });
+	assert.equal(presenceChanges, 1, "ready announces presence");
 	const path = `/api/managed/snapshots/${threadId}`;
 	const blocked = call(path, "PUT", headers, " ", true);
 	const competing = call(path, "PUT", headers, "{}"); await competing.done;
@@ -85,6 +87,22 @@ try {
 	const archivedPage = call("/api/threads?q=pagination&archived=true", "GET", {}, null); await archivedPage.done;
 	assert.equal(archivedPage.res.body.threads.length, 5);
 	console.log("ok catalog: filtered keyset pagination across tied timestamps and archived rows");
+	const active = async () => { const page = call("/api/threads?active=true", "GET", {}, null); await page.done; return page.res.body.threads.map((row) => row.threadId); };
+	assert.deepEqual(tower.presence().map((runner) => runner.sessions), [[]], "a sleeping thread is not a session");
+	assert.deepEqual(await active(), []);
+	fixtureRunner.message({ type: "runtime_state", threadId, state: "idle", sync: "synced" });
+	assert.equal(presenceChanges, 2, "waking announces presence");
+	assert.deepEqual(tower.presence()[0].sessions, [{ name: "limits", threadId, state: "idle", managed: true }]);
+	assert.deepEqual(await active(), [threadId], "catalog rows without a live runtime are inactive");
+	fixtureRunner.message({ type: "runtime_state", threadId, state: "starting", sync: "synced" });
+	assert.equal(tower.presence()[0].sessions[0].state, "opening");
+	fixtureRunner.message({ type: "runtime_state", threadId, state: "sleeping", sync: "synced" });
+	assert.equal(presenceChanges, 4);
+	assert.deepEqual(tower.presence()[0].sessions, []);
+	assert.deepEqual(await active(), []);
+	fixtureRunner.message({ type: "runtime_state", threadId, state: "sleeping", sync: "pending" });
+	assert.equal(presenceChanges, 4, "same state does not rebroadcast");
+	console.log("ok active threads: presence sessions, state transitions and active list filter");
 	tower.close();
 	headers = open({ minFreeBytes: Number.MAX_SAFE_INTEGER });
 	const low = call(path, "PUT", headers, "{}"); await low.done;
