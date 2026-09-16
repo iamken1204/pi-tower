@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // pi-task: dispatch a prompt to a remote pi runner via a tower; final answer on stdout.
-import { formatRunners, listRunners, readTokenFile, runTask } from "./lib.mjs";
+import { formatRunners, listRunners, loadToken, runTask } from "./lib.mjs";
 
 const usage = `usage: pi-task [--tower <ws(s)://url>] [--token <t> | --token-file <path>] [--session <name>] [--fresh] <runner-id> "<prompt>"
        pi-task --list
-env fallbacks: PI_TOWER_URL, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE
+env fallbacks: PI_TOWER_URL, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE; default token file ~/.pi-tower/token
 quickstart:
   pi-task --list                    # who's online
   pi-task win-test-1 "run the failing job and report the error"
@@ -43,18 +43,16 @@ function parseArgs(argv) {
 		} else if (argv[i].startsWith("--")) fail(`unknown option ${argv[i]}`);
 		else opts.rest.push(argv[i]);
 	}
-	if (opts.tokenFile) {
-		try {
-			opts.token = readTokenFile(opts.tokenFile);
-		} catch (error) {
-			fail(error instanceof Error ? error.message : String(error));
-		}
+	try {
+		opts.token = loadToken(opts);
+	} catch (error) {
+		fail(error.message);
 	}
 	return opts;
 }
 
 const { tower, token, session, fresh, list, rest } = parseArgs(process.argv.slice(2));
-if (!tower || !token) fail("missing tower url or token");
+if (!tower) fail("missing tower url");
 if (session !== undefined && !/^[A-Za-z0-9._-]{1,64}$/.test(session)) fail("invalid --session name");
 
 try {

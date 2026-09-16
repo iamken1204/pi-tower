@@ -30,7 +30,7 @@ function open(options = {}) {
 	const runner = new Socket(); fixtureRunner = runner;
 	tower.routes["/managed/runner"](runner, new URLSearchParams({ id: "fixture", instance: instanceId, boot: randomUUID() }));
 	const connectionId = runner.frames[0].connectionId;
-	runner.message({ type: "inventory", piVersion: "0.85.1", threads: [{ threadId, piSessionId: sessionId, workspaceId, state: "sleeping" }] });
+	runner.message({ type: "inventory", piVersion: "0.85.1", cwd: "/fixture", threads: [{ threadId, piSessionId: sessionId, workspaceId, cwd: "/fixture", state: "sleeping" }] });
 	runner.message({ type: "reconciled", connectionId });
 	assert.equal(runner.frames.at(-1).type, "inventory_confirmed");
 	return { "x-runner-instance": instanceId, "x-runner-connection": connectionId };

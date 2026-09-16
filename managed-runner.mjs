@@ -24,6 +24,21 @@ export class ManagedRunner {
 		this.piPackage = piPackage || resolve(execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "@earendil-works/pi-coding-agent");
 		if (readJson(resolve(this.piPackage, "package.json")).version !== "0.85.1") throw new Error("managed mode requires pi 0.85.1");
 		privateDirectory(this.dataDir);
+		privateDirectory(resolve(this.dataDir, "threads"));
+		const identityFile = resolve(this.dataDir, "instance.json");
+		try {
+			writeFileSync(identityFile, JSON.stringify({ version: 1, instanceId: randomUUID(), runnerId: id, host: hostname() }), { flag: "wx", mode: 0o600 });
+			syncFile(identityFile); syncFile(this.dataDir);
+		} catch (error) { if (error.code !== "EEXIST") throw error; }
+		this.identity = readJson(identityFile);
+		if (this.identity.version !== 1 || this.identity.runnerId !== id || this.identity.host !== hostname()) throw new Error("runner_identity_mismatch");
+		uuid(this.identity.instanceId);
+		this.threads = new Map(); // Threads this process hosts; several processes may share the data directory.
+		this.createSupported = false;
+	}
+
+	// Headless wrapper: one per data directory, hosting every thread no terminal owns and accepting browser-created ones.
+	hostAll() {
 		this.lock = resolve(this.dataDir, "writer.lock");
 		this.writerGuard = holdWriterLock(resolve(this.dataDir, "writer.sqlite"));
 		// Pre-lock-protocol children cannot be proven dead. Their old marker is never stolen.
@@ -31,22 +46,30 @@ export class ManagedRunner {
 		mkdirSync(this.lock, { recursive: true, mode: 0o700 });
 		durableWrite(resolve(this.lock, "kernel-v1.json"), { version: 1 });
 		syncFile(this.dataDir);
-		const identityFile = resolve(this.dataDir, "instance.json");
-		if (!existsSync(identityFile)) durableWrite(identityFile, { version: 1, instanceId: randomUUID(), runnerId: id, host: hostname() });
-		this.identity = readJson(identityFile);
-		if (this.identity.version !== 1 || this.identity.runnerId !== id || this.identity.host !== hostname()) throw new Error("runner_identity_mismatch");
-		uuid(this.identity.instanceId);
-		this.threads = new Map();
-		privateDirectory(resolve(this.dataDir, "threads"));
-		for (const name of readdirSync(resolve(this.dataDir, "threads"))) {
-			if (name.startsWith(".prepare-")) continue; // Never published or used by a child; retain crash evidence.
-			const recordFile = resolve(this.dataDir, "threads", uuid(name), "record.json");
+		for (const { threadId, record } of this.records()) if (!record.interactive) this.adopt(threadId);
+		this.createSupported = true;
+	}
+
+	records() {
+		const threads = resolve(this.dataDir, "threads");
+		return readdirSync(threads).filter((name) => !name.startsWith(".prepare-")).map((name) => { // Unpublished prepare dirs retain crash evidence.
+			const recordFile = resolve(threads, uuid(name), "record.json");
 			const record = readJson(recordFile);
 			this.validateRecord(record, name);
-			const entry = this.entry(record, recordFile);
-			if (record.awake) this.recoverExited(entry);
-			this.threads.set(name, entry);
-		}
+			return { threadId: name, record, recordFile };
+		});
+	}
+
+	// Host one thread. An awake record whose writer still lives in another process fails with writer_locked.
+	adopt(threadId) {
+		const recordFile = resolve(this.dataDir, "threads", uuid(threadId), "record.json");
+		if (!existsSync(recordFile)) throw new Error("unknown_thread");
+		const record = readJson(recordFile);
+		this.validateRecord(record, threadId);
+		const entry = this.entry(record, recordFile);
+		if (record.awake) this.recoverExited(entry);
+		this.threads.set(threadId, entry);
+		return entry;
 	}
 
 	recoverExited(entry) {
@@ -76,24 +99,31 @@ export class ManagedRunner {
 		uuid(record.piSessionId); uuid(record.workspaceId);
 	}
 
+	announce() {
+		this.emit({ type: "inventory", cwd: this.cwd, createSupported: this.createSupported, threads: this.inventory(), piVersion: "0.85.1" });
+	}
+
 	inventory() {
-		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId,
+		return [...this.threads.values()].map(({ record, state, sync, syncError, cloudCheck, activeCommand, dialogs, native }) => ({ threadId: record.threadId, workspaceId: record.workspaceId, cwd: record.effectiveCwd,
 			registration: record.registration, inputReady: record.interactive ? !!native : undefined, queueSupported: !!native, queue: native?.queue() ?? [],
 			piSessionId: record.piSessionId, state, runId: activeCommand ?? null, pendingDialogs: [...dialogs.values()],
 			missingSession: !existsSync(record.sessionFile),
 			sync: syncError ? "error" : cloudCheck || sync.pending || !sync.ack ? "pending" : "synced", latestRevision: sync.ack?.revision ?? null }));
 	}
 
-	prepare(threadId) {
+	// Tower may only place a thread in a workspace this runner already works in; browsers never name server paths.
+	prepare(threadId, cwd = this.cwd) {
 		uuid(threadId);
 		if (this.threads.has(threadId)) return this.info(threadId);
 		const dir = resolve(this.dataDir, "threads", threadId);
+		if (existsSync(dir)) { this.adopt(threadId); return this.info(threadId); } // Published before a crash: keep its identity.
+		if (cwd !== this.cwd && !this.records().some((item) => item.record.effectiveCwd === cwd)) throw new Error("unknown_workspace");
 		const preparing = resolve(this.dataDir, "threads", `.prepare-${threadId}-${randomUUID()}`);
 		mkdirSync(preparing, { mode: 0o700 });
 		const record = { version: 1, threadId, runnerInstanceId: this.identity.instanceId, workspaceId: randomUUID(),
-			effectiveCwd: this.cwd, piSessionId: randomUUID(), sessionFile: resolve(dir, "session.jsonl"),
+			effectiveCwd: cwd, piSessionId: randomUUID(), sessionFile: resolve(dir, "session.jsonl"),
 			checkpointFile: resolve(dir, "checkpoint.json"), awake: false };
-		const header = { type: "session", version: 3, id: record.piSessionId, timestamp: new Date().toISOString(), cwd: this.cwd };
+		const header = { type: "session", version: 3, id: record.piSessionId, timestamp: new Date().toISOString(), cwd };
 		writeFileSync(resolve(preparing, "session.jsonl"), `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
 		syncFile(resolve(preparing, "session.jsonl"));
 		durableWrite(resolve(preparing, "checkpoint.json"), checkpoint(header, [], null));
@@ -372,7 +402,7 @@ export class ManagedRunner {
 	async request(input) {
 		const { operation, threadId, message, commandId, targetRunId, dialogId, value } = input;
 		if (this.stopping) throw new Error("runner_stopping");
-		if (operation === "prepare") return this.prepare(threadId);
+		if (operation === "prepare") return this.prepare(threadId, input.cwd);
 		this.info(threadId);
 		const entry = this.threads.get(threadId);
 		if (operation === "state") return this.info(threadId);
@@ -467,7 +497,7 @@ export class ManagedRunner {
 				let envelope;
 				try {
 					envelope = JSON.parse(data);
-					if (envelope.type === "welcome") { this.connectionId = uuid(envelope.connectionId); this.emit({ type: "inventory", threads: this.inventory(), piVersion: "0.85.1" }); return; }
+					if (envelope.type === "welcome") { this.connectionId = uuid(envelope.connectionId); this.announce(); return; }
 					if (envelope.type === "inventory_ready" && envelope.connectionId === this.connectionId) {
 						for (const entry of this.threads.values()) {
 							for (const receipt of entry.journal.all()) this.emit({ type: "command_status", threadId: entry.record.threadId, receipt });
@@ -535,6 +565,7 @@ export class ManagedRunner {
 			} catch { entry.runtime?.child.kill("SIGKILL"); }
 		}));
 		if ([...this.threads.values()].some((entry) => entry.record.awake)) throw new Error("unclean_shutdown: writer lock retained");
+		if (!this.writerGuard) return;
 		unlinkSync(resolve(this.lock, "kernel-v1.json"));
 		rmdirSync(this.lock);
 		syncFile(this.dataDir);

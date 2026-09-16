@@ -71,7 +71,7 @@ async function probe(mode) {
 	await Promise.all([mkdir(home, { recursive: true }), mkdir(cwd, { recursive: true }), mkdir(data, { recursive: true })]);
 	const id = `phase0-crash-${mode}`;
 	const piArgs = real ? ["--", "--no-session", "-ne", "-ns", "-np", "--no-themes", "-e", resolve(here, "pi-extension.mjs"), "--provider", "phase0", "--model", "faux-1"] : [];
-	const runner = spawn(process.execPath, [resolve(root, "runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", id, "--token", token, ...piArgs], {
+	const runner = spawn(process.execPath, [resolve(root, "runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", id, "--token", token, "--no-interactive", ...piArgs], {
 		cwd,
 		env: { HOME: home, XDG_DATA_HOME: data, PI_CODING_AGENT_DIR: data, PI_OFFLINE: "1",
 			PHASE0_REAL_PI: real ? resolve(pkg, "dist/bundle/cli.js") : "", PI_COMPAT_PACKAGE: pkg || "",

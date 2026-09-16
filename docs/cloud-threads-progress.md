@@ -4,7 +4,7 @@
 
 ## 本機互動式 pi：交付方式與實測
 
-`pi-runner --interactive --data-dir <本機資料目錄>` 在終端執行公開 SDK 的 `InteractiveMode`。本機 thread 自動出現在 Tower，所有已登入的瀏覽器直接送訊息，不必取得或釋放操作權。忙碌時預設排入 follow-up，也能 steering 或停止；TUI 狀態列與網頁顯示佇列。恢復既有 thread 加上 `--thread <UUID>`，原生 thread 不會因網頁送訊息而自動啟動另一個 runtime。各終端使用不同 runner ID 與資料目錄。
+`pi-runner --hq <tower>`（互動模式與 `~/.pi-tower` 資料目錄皆為預設）在終端執行公開 SDK 的 `InteractiveMode`。本機 thread 自動出現在 Tower，所有已登入的瀏覽器直接送訊息，不必取得或釋放操作權。忙碌時預設排入 follow-up，也能 steering 或停止；TUI 狀態列與網頁顯示佇列。恢復既有 thread 比照原生 pi：在同一目錄下 `-c` 接最新、`-r` 挑選，或 `--thread <UUID>` 指名；原生 thread 不會因網頁送訊息而自動啟動另一個 runtime。多個終端可共用同一 runner ID 與 `~/.pi-tower`，每個 thread 同時只由一個終端 host。
 
 單一程序持有 session writer。公開 `session.prompt` 外層在 pi 非同步 preflight 前保留執行位置，本機與遠端輸入共用順序；停止會清除佇列，已取消或結果不明的命令不從歷史文字猜成 settled，也不重播。成功回傳並保存 checkpoint 才更新收據。`select`／`confirm`／`input` 用公開 UI context 與 AbortSignal 讓第一個有效答案關閉另一個提示；editor 保留本機介面，網頁只能顯示提示。
 

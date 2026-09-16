@@ -5,7 +5,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
-import { readTokenFile } from "./lib.mjs";
+import { loadToken } from "./lib.mjs";
 import { createManagedTower } from "./managed-tower.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -46,16 +46,10 @@ function parseArgs(argv) {
 		process.exit(1);
 	}
 	opts.idleTtlMs = Number(ttl[1]) * { s: 1000, m: 60_000, h: 3_600_000 }[ttl[2] ?? "m"];
-	if (opts.tokenFile) {
-		try {
-			opts.token = readTokenFile(opts.tokenFile);
-		} catch (error) {
-			console.error(error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		}
-	}
-	if (!opts.token) {
-		console.error("missing token: pass --token, --token-file, or set PI_TOWER_TOKEN / PI_TOWER_TOKEN_FILE");
+	try {
+		opts.token = loadToken(opts);
+	} catch (error) {
+		console.error(error.message);
 		process.exit(1);
 	}
 	return opts;

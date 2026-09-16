@@ -311,7 +311,7 @@
 			}
 			.thread-row {
 				display: grid;
-				grid-template-columns: minmax(12rem, 1fr) 11rem 12rem 13rem auto;
+				grid-template-columns: minmax(12rem, 1fr) 9rem minmax(9rem, 16rem) 12rem 13rem auto;
 				border-bottom: 1px solid;
 			}
 			.thread-row > a {
@@ -787,7 +787,7 @@
 					<ul id="thread-list" class="thread-list"></ul>
 					<div id="empty" class="empty hidden">
 						<h2>No threads found</h2>
-						<p>Choose an online runner to start a managed thread, or show inactive or archived threads.</p>
+						<p>Start a thread from a terminal, choose a runner with a --managed-threads process, or show inactive or archived threads.</p>
 					</div>
 					<button id="more" class="button load-more hidden" type="button">Load more</button>
 				</section>
@@ -806,6 +806,7 @@
 					</header>
 					<div class="status-grid">
 						<div class="status-item"><span class="eyebrow">Runner</span><b id="runner-state">—</b></div>
+						<div class="status-item"><span class="eyebrow">Workspace</span><b id="workspace-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Runtime</span><b id="runtime-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Cloud sync</span><b id="sync-state">—</b></div>
 						<div class="status-item"><span class="eyebrow">Checkpoint</span><b id="revision-state">—</b></div>
@@ -837,6 +838,7 @@
 			<form id="edit-form">
 				<h2 id="edit-heading">New thread</h2>
 				<label id="runner-label">Runner<select id="edit-runner"></select></label
+				><label id="workspace-label">Workspace<select id="edit-workspace"></select></label
 				><label>Title (optional)<input id="edit-title" maxlength="200" /></label>
 				<div class="dialog-actions">
 					<button class="button primary" value="default">Save</button
@@ -944,12 +946,22 @@
 					while (select.options.length > (select.id === "runner-filter" ? 1 : 0))
 						select.remove(select.options.length - 1);
 					for (const runner of state.runners) {
-						const option = new Option(`${runner.id}${runner.online ? "" : " (offline)"}`, runner.id);
-						option.disabled = select.id === "edit-runner" && !runner.online;
+						const option = new Option(`${runner.id}${runner.online ? (runner.createSupported ? "" : " (terminals only)") : " (offline)"}`, runner.id);
+						option.disabled = select.id === "edit-runner" && !runner.createSupported;
 						select.add(option);
 					}
 					select.value = prior;
 				}
+				loadWorkspaces();
+			}
+			// A new thread runs in one of the chosen runner's known directories; the browser never types a path.
+			function loadWorkspaces() {
+				const select = $("edit-workspace");
+				const prior = select.value;
+				select.replaceChildren();
+				for (const cwd of state.runners.find((runner) => runner.id === $("edit-runner").value)?.cwds ?? []) select.add(new Option(cwd, cwd));
+				select.value = prior;
+				if (select.selectedIndex < 0) select.selectedIndex = 0;
 			}
 			async function loadThreads(append) {
 				$("list-view").classList.remove("hidden");
@@ -982,6 +994,7 @@
 					li.append(
 						link,
 						cell(row.runnerId),
+						cell(row.cwd || "—"),
 						cell(formatDate(row.updatedAt)),
 						cell(pill(row.online ? row.runtime?.state || "sleeping" : "offline")),
 						cell(pill(row.runtime?.sync || "synced")),
@@ -1015,9 +1028,10 @@
 				return b;
 			}
 			function editThread(row = null) {
-				if (!row && !$("edit-runner").value) $("edit-runner").value = state.runners.find((runner) => runner.online)?.id || "";
+				if (!row && !$("edit-runner").value) $("edit-runner").value = state.runners.find((runner) => runner.createSupported)?.id || "";
+				loadWorkspaces();
 				$("edit-heading").textContent = row ? "Rename thread" : "New thread";
-				$("runner-label").classList.toggle("hidden", !!row);
+				for (const label of ["runner-label", "workspace-label"]) $(label).classList.toggle("hidden", !!row);
 				$("edit-title").value = row?.title || "";
 				$("edit-form").dataset.threadId = row?.threadId || "";
 				$("edit-form").dataset.createKey = uuid();
@@ -1039,7 +1053,7 @@
 					if (!runnerId) throw new Error("Choose an online runner.");
 					const row = await api("/api/threads", {
 						method: "POST",
-						body: { runnerId, title: $("edit-title").value.trim() || undefined, idempotencyKey: $("edit-form").dataset.createKey },
+						body: { runnerId, cwd: $("edit-workspace").value || undefined, title: $("edit-title").value.trim() || undefined, idempotencyKey: $("edit-form").dataset.createKey },
 					});
 					location.href = `/threads/${encodeURIComponent(row.threadId)}`;
 				} catch (error) {
@@ -1085,6 +1099,7 @@
 				document.title = `${row.title || "Untitled thread"} — Pi Tower`;
 				$("thread-id").textContent = row.threadId;
 				$("runner-state").replaceChildren(pill(row.online ? "online" : "offline"));
+				$("workspace-state").textContent = row.cwd || "—";
 				$("runtime-state").replaceChildren(pill(runtime.state || "sleeping"));
 				$("sync-state").replaceChildren(pill(runtime.sync || "synced"));
 				$("revision-state").textContent =
@@ -1592,6 +1607,7 @@
 			$("more").addEventListener("click", () => loadThreads(true).catch((error) => notice(error.message, "error")));
 			$("create").addEventListener("click", () => editThread());
 			$("edit-form").addEventListener("submit", saveEdit);
+			$("edit-runner").addEventListener("change", loadWorkspaces);
 			$("edit-cancel").addEventListener("click", () => $("edit-modal").close());
 			$("rename").addEventListener("click", () => editThread(state.row));
 			$("archive-action").addEventListener("click", () => patchThread(state.row, { archived: !state.row.archivedAt }));

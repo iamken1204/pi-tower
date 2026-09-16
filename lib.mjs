@@ -1,5 +1,9 @@
 // Shared tower client: attach → prompt → settle → final-text flow, used by extension.ts and task.mjs.
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+
+export const DEFAULT_TOKEN_FILE = resolve(homedir(), ".pi-tower", "token");
 
 const httpFromWs = (url) => url.replace(/^ws/, "http");
 
@@ -7,6 +11,18 @@ export function readTokenFile(path) {
 	const token = readFileSync(path, "utf8").replace(/\r?\n$/, "");
 	if (!token) throw new Error(`token file is empty: ${path}`);
 	return token;
+}
+
+// Precedence: explicit token, explicit file, then ~/.pi-tower/token.
+export function loadToken({ token, tokenFile }) {
+	if (token) return token;
+	if (tokenFile) return readTokenFile(tokenFile);
+	try {
+		return readTokenFile(DEFAULT_TOKEN_FILE);
+	} catch (error) {
+		if (error.code !== "ENOENT") throw error;
+		throw new Error(`missing token: pass --token or --token-file, set PI_TOWER_TOKEN or PI_TOWER_TOKEN_FILE, or create ${DEFAULT_TOKEN_FILE}`);
+	}
 }
 
 export async function listRunners(tower, token) {

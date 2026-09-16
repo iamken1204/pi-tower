@@ -112,8 +112,8 @@ Fixed runner
 1. 每個 thread 綁定一個持久的 runner instance 與一個工作目錄。v1 使用該 runner 啟動時的 cwd；瀏覽器不能任意指定伺服器路徑。
 2. Runner 是執行狀態與 session entries 的唯一寫入者。Tower 保存雲端副本，擁有 thread 標題、封存狀態及瀏覽器操作權。
 3. Thread 使用不透明 UUID，不以標題、legacy session 名稱或絕對路徑當作身分。
-4. 同一 runner ID 的不同 instance 不得同時註冊。Instance ID 保存在 runner 資料目錄，程序重啟時不變；每次啟動另外產生 boot ID。
-5. Tower 重連時可重建連線表，但不得因此建立第二份 runtime。Runner 啟動時鎖定資料目錄，避免兩個 wrapper 共用資料啟動重複 child。
+4. 同一 runner ID 的不同 instance 不得同時註冊。Instance ID 保存在 runner 資料目錄，程序重啟時不變；每次啟動另外產生 boot ID。同一 instance 可同時有多條連線（多個終端機），每個 thread 同時只由一條連線 host。
+5. Tower 重連時可重建連線表，但不得因此建立第二份 runtime。Headless wrapper 啟動時鎖定整個資料目錄，避免兩個 wrapper 共用資料啟動重複 child；終端機只鎖定自己 host 的 thread。
 6. v1 採單一 Tower 程序與持久磁碟。橫向擴充及多 Tower 主動寫入不在範圍內。
 
 ### 儲存選擇
@@ -148,7 +148,7 @@ v1 必須提供可設定的快照總量配額、磁碟剩餘空間警戒與使�
 | --- | --- |
 | `threadId` | 全域 UUID |
 | `runnerId`, `runnerInstanceId` | 路由名稱與固定執行者身分 |
-| `workspaceId` | runner 配發的工作目錄識別；實際絕對路徑只存在 runner |
+| `workspaceId`, `cwd` | runner 配發的工作目錄識別與其絕對路徑；瀏覽器看得到路徑，建立 thread 時只能從 runner 已知的目錄挑選，不能自行輸入 |
 | `title`, `archivedAt` | Tower 管理的顯示資訊 |
 | `createdAt`, `updatedAt` | 建立時間與最後活動時間；heartbeat 不更新排序 |
 | `piSessionId` | 第一次 runtime 建立後記錄，之後還原必須一致 |

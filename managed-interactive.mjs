@@ -2,9 +2,10 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { writeFileSync } from "node:fs";
+import { realpathSync, statSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { ManagedRunner } from "./managed-runner.mjs";
-import { checkpoint, durableWrite, loadCheckpoint, syncFile } from "./managed-storage.mjs";
+import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
 import { holdWriterLock } from "./managed-lock.mjs";
 
 export async function runInteractive(options) {
@@ -13,9 +14,7 @@ export async function runInteractive(options) {
 	const api = await import(pathToFileURL(`${runner.piPackage}/dist/index.js`));
 	let runtime, current;
 	const guards = new Map();
-	const publish = () => {
-		if (runner.ws?.readyState === 1) runner.emit({ type: "inventory", threads: runner.inventory(), piVersion: "0.85.1" });
-	};
+	const publish = () => { if (runner.ws?.readyState === 1) runner.announce(); };
 	function attach(session, entry) {
 		if (entry.native?.session === session && entry.native.ui === session.extensionRunner.getUIContext()) return;
 		entry.native?.dispose();
@@ -158,12 +157,10 @@ export async function runInteractive(options) {
 		});
 		entry.record.awake = true; durableWrite(entry.recordFile, entry.record); save(); publish();
 	}
-	const initialId = options.threadId ?? randomUUID();
-	if (!options.threadId) runner.prepare(initialId);
-	const initial = runner.threads.get(initialId);
-	if (!initial) throw new Error("unknown_thread");
+	const initial = await chooseThread(runner, options);
 	guards.set(initial.recordFile, holdWriterLock(resolve(initial.recordFile, "../runtime.sqlite")));
 	const saved = loadCheckpoint(initial.record.checkpointFile, initial.record.sessionFile, initial.record.piSessionId, initial.record.effectiveCwd);
+	if (realpathSync(initial.record.effectiveCwd) !== initial.record.effectiveCwd) throw new Error("workspace_changed");
 	process.chdir(initial.record.effectiveCwd);
 	let manager = api.SessionManager.open(initial.record.sessionFile);
 	saved.leafId === null ? manager.resetLeaf() : manager.branch(saved.leafId);
@@ -207,4 +204,38 @@ export async function runInteractive(options) {
 		void guards;
 	});
 	await tui.run();
+}
+
+// Like native pi: --thread names one, -c continues the newest thread of this cwd, -r picks among them, otherwise start fresh here.
+// A terminal only ever hosts terminal threads; browser-created ones stay with the headless wrapper.
+async function chooseThread(runner, options) {
+	if (options.threadId) {
+		const entry = runner.adopt(options.threadId);
+		if (!entry.record.interactive) throw new Error("thread_is_headless: browser-created threads run in the --managed-threads runner");
+		return entry;
+	}
+	const recent = runner.records().filter(({ record }) => record.interactive && record.effectiveCwd === runner.cwd)
+		.sort((a, b) => statSync(b.record.checkpointFile).mtimeMs - statSync(a.record.checkpointFile).mtimeMs);
+	if (options.resume) return runner.adopt(await pickThread(recent));
+	if (options.continueRecent && recent.length) return runner.adopt(recent[0].threadId);
+	const id = randomUUID();
+	runner.prepare(id);
+	const entry = runner.threads.get(id);
+	entry.record.interactive = true;
+	durableWrite(entry.recordFile, entry.record);
+	return entry;
+}
+
+async function pickThread(items) {
+	if (!items.length) throw new Error("no_threads_in_workspace");
+	for (const [index, { record }] of items.entries()) {
+		const preview = firstPrompt(readJson(record.checkpointFile).entries).slice(0, 60) || "(untitled)";
+		console.log(`${index + 1}. ${statSync(record.checkpointFile).mtime.toLocaleString()}  ${preview}`);
+	}
+	const prompt = createInterface({ input: process.stdin, output: process.stdout });
+	const answer = await prompt.question("Resume thread: ");
+	prompt.close();
+	const chosen = items[Number(answer) - 1];
+	if (!chosen) throw new Error("invalid_choice");
+	return chosen.threadId;
 }

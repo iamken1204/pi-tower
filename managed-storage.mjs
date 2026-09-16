@@ -33,6 +33,13 @@ export function privateDirectory(dir) {
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
+// Text of the first user message: a thread's natural title.
+export function firstPrompt(entries) {
+	const content = entries.find((entry) => entry.message?.role === "user")?.message.content;
+	const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join(" ") : "";
+	return text.trim();
+}
+
 export function checkpoint(header, entries, leafId) {
 	if (header?.type !== "session" || header.version !== 3 || typeof header.cwd !== "string") throw new Error("unsupported_session");
 	uuid(header.id);

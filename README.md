@@ -68,7 +68,7 @@ Open `https://<that-hostname>/` and enter the shared token to view live runner a
 npx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/token -- --no-session
 ```
 
-The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
+The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
 **Interactive side** (wherever you drive pi from)
 
@@ -126,6 +126,7 @@ The public UI shell and health response expose no runner state. CLI requests and
 | `GET /api/events` | protected SSE stream of runner and session state |
 | `GET /runners` | JSON `[{id, connectedAt, sessions}]` |
 | `WS /runner?id=<id>` | runner control channel; same id reconnect replaces the socket, live sessions survive |
+| `WS /managed/runner?id=<id>&instance=<uuid>&boot=<uuid>` | one managed process; several per id, each hosting its own threads; a reconnect with the same boot replaces its stale socket |
 | `WS /runner-session?id=<id>&session=<name>` | runner-dialed data pipe, one per session |
 | `WS /attach?runner=<id>&session=<name>` | client attachment, one per session (`session` defaults to `main`) |
 
@@ -156,18 +157,19 @@ The four legacy scripts cover relay semantics, a real no-LLM RPC chain, extensio
 Cloud Threads connects a native local pi terminal to browser input, with a persistent catalog, saved history and command receipts. Start the runner from your workspace in a terminal:
 
 ```sh
-pi-tower --data-dir /persistent/tower --token-file /path/to/token
-pi-runner --hq wss://tower.example.com --id workstation --token-file /path/to/token \
-  --interactive --data-dir /persistent/runner
+pi-tower --data-dir /persistent/tower
+pi-runner --hq wss://tower.example.com
 ```
+
+Both read the shared token from `~/.pi-tower/token` unless told otherwise. The runner keeps its data in `~/.pi-tower` (`--data-dir` or `PI_RUNNER_DATA_DIR` override) and uses the hostname as its id.
 
 After signing in at `https://tower.example.com/`, open `https://tower.example.com/threads/`. The same shared token grants access to every thread and runner. Use HTTPS/WSS outside a trusted local network.
 
-The local thread appears automatically. The list shows active threads only: awake on an online runner. Tick **Inactive** to include sleeping ones, for example to copy a UUID for `--thread`. The home page counts online runners and active threads. Send from the terminal or any authenticated browser without acquiring or releasing control. Browser input during a run queues a follow-up; **Steer current run** uses pi steering. **Stop** cancels the run and pending queue. Closing the browser does not stop pi. When Tower is disconnected, the local terminal continues and uploads progress after reconnecting.
+The local thread appears automatically. The list shows active threads only: awake on an online runner. Tick **Inactive** to include sleeping ones. Every thread shows the directory it runs in. The home page counts online runners and active threads. Send from the terminal or any authenticated browser without acquiring or releasing control. Browser input during a run queues a follow-up; **Steer current run** uses pi steering. **Stop** cancels the run and pending queue. Closing the browser does not stop pi. When Tower is disconnected, the local terminal continues and uploads progress after reconnecting.
 
-Exit pi normally, then add `--thread <UUID from the thread URL>` to the same command to resume it. This restores the original workspace, full session tree and saved active leaf. `/new` creates another managed thread; `/reload` preserves the connection bridge. An inactive native thread cannot start itself from the web: resume it in a local terminal. Each running terminal needs its own runner ID and data directory. Copying runner data between hosts is unsupported. There is no orb or replacement runtime.
+Exit pi normally, then resume the way native pi does: from the same directory, `-c` continues that directory's newest thread and `-r` lists its threads to pick from; `--thread <UUID from the thread URL>` names one from anywhere. All three restore the thread's original directory, full session tree and saved active leaf; a thread never follows the terminal's cwd. `/new` creates another managed thread in the same directory; `/reload` preserves the connection bridge. An inactive native thread cannot start itself from the web: resume it in a local terminal. Open more terminals the same way: each is another connection of the same runner sharing `~/.pi-tower`, and every thread is served by exactly one process at a time. Copying runner data between hosts is unsupported. There is no orb or replacement runtime.
 
-`--managed-threads` without `--interactive` retains the older background RPC mode for browser-created threads. It has no native terminal and accepts prompts only while idle. Legacy relay commands are unchanged.
+`--managed-threads` selects the older background RPC mode for browser-created threads. It has no native terminal and accepts prompts only while idle. It is the only process that hosts browser-created threads, and one per data directory. **New thread** in the browser needs one on the chosen runner and picks one of the directories that runner already works in, the one it started from or any existing thread's; the runner refuses any other path. Legacy relay commands are unchanged.
 
 Run the wrapper from the workspace used for new threads. Existing threads retain that cwd across restarts and always execute on the same runner host. Do not clone or copy a runner data directory to another host; Cloud Threads does not migrate the repo, working tree, credentials, or tool side effects. Managed mode currently accepts pi 0.85.1; this is the tested version, not a minimum inferred from package discovery. `--pi-package /absolute/package/directory` overrides global npm discovery. Configure models and extensions through normal pi settings. Managed mode rejects passthrough pi arguments, including session, continue, and no-session overrides. Legacy sessions and the commands above remain unchanged when managed mode is disabled.
 
@@ -183,7 +185,7 @@ Run `npm run verify:phase0` for isolated regression tests, and `npm run verify:n
 
 ### Docker storage and backup
 
-The Compose deployment enables managed Tower storage at `/data` on the `tower-data` volume. Its web interface is available at `https://<tunnel-hostname>/threads/`. Runner data is separate and must remain on each runner host; start each managed runner with its own persistent `PI_RUNNER_DATA_DIR` or `--data-dir`.
+The Compose deployment enables managed Tower storage at `/data` on the `tower-data` volume. Its web interface is available at `https://<tunnel-hostname>/threads/`. Runner data is separate and must remain on each runner host; each managed runner keeps its own persistent data directory, `~/.pi-tower` unless `PI_RUNNER_DATA_DIR` or `--data-dir` says otherwise.
 
 Snapshots can contain prompts, tool output, source code, and secrets. They are not end-to-end encrypted. Restrict and encrypt the Tower volume and backups, rotate the shared token if it leaks, and back up each runner's data and workspace separately. Losing the Tower volume loses cloud history; losing runner data or its workspace cannot be repaired by moving a Tower backup to a different runner.
 

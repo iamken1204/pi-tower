@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { statSync, statfsSync } from "node:fs";
-import { privateDirectory, uuid } from "./managed-storage.mjs";
+import { firstPrompt, privateDirectory, uuid } from "./managed-storage.mjs";
 import { createSnapshotStore } from "./managed-snapshots.mjs";
 import { commandPayload, payloadHash } from "./managed-journal.mjs";
 
@@ -26,7 +26,7 @@ export function createManagedTower(dataDir, {
 	db.pragma("busy_timeout = 1250");
 	db.pragma("wal_autocheckpoint = 1000");
 	const schema = db.pragma("user_version", { simple: true });
-	if (schema > 3) { db.close(); throw new Error("unsupported_tower_schema"); }
+	if (schema > 4) { db.close(); throw new Error("unsupported_tower_schema"); }
 	db.transaction(() => {
 		db.exec(`CREATE TABLE IF NOT EXISTS managed_runners (runnerId TEXT PRIMARY KEY, instanceId TEXT NOT NULL);
 		CREATE TABLE IF NOT EXISTS threads (
@@ -34,12 +34,13 @@ export function createManagedTower(dataDir, {
 			runnerInstanceId TEXT NOT NULL, title TEXT NOT NULL, createdAt TEXT NOT NULL,
 			workspaceId TEXT, piSessionId TEXT, metadataVersion INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE IF NOT EXISTS managed_commands (threadId TEXT NOT NULL, commandId TEXT NOT NULL, payloadHash TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(threadId,commandId));
-		PRAGMA user_version = 3;`);
+		PRAGMA user_version = 4;`);
 		if (schema < 3) db.exec(`ALTER TABLE threads ADD COLUMN updatedAt TEXT;
 			ALTER TABLE threads ADD COLUMN archivedAt TEXT;
 			ALTER TABLE threads ADD COLUMN createTitle TEXT;
 			UPDATE threads SET updatedAt=createdAt, createTitle=title;
 			CREATE INDEX threads_activity ON threads(updatedAt DESC,threadId DESC);`);
+		if (schema < 4) db.exec("ALTER TABLE threads ADD COLUMN cwd TEXT");
 	})();
 	const snapshots = createSnapshotStore(db, { maxSnapshotBytes, maxTotalBytes });
 	let uploads = 0;
@@ -55,7 +56,8 @@ export function createManagedTower(dataDir, {
 		const receipt = JSON.parse(row.receipt);
 		if (["received", "dispatching", "accepted"].includes(receipt.status)) db.prepare("UPDATE managed_commands SET receipt=? WHERE threadId=? AND commandId=?").run(JSON.stringify({ ...receipt, status: "unknown" }), row.threadId, row.commandId);
 	}
-	const runners = new Map();
+	const runners = new Map(); // connectionId -> live runner process; one machine (runner id) may hold several.
+	const hosts = new Map(); // threadId -> the connection currently serving it.
 	const clients = new Map();
 	const accesses = new Map(); // One runner-installed epoch shared by every attached browser.
 	const metadataChanging = new Set();
@@ -64,12 +66,17 @@ export function createManagedTower(dataDir, {
 	let epochCounter = 0;
 	const liveStates = new Map();
 	const thread = (id) => {
-		const row = db.prepare("SELECT threadId, runnerId, runnerInstanceId, title, createdAt, updatedAt, archivedAt, workspaceId, piSessionId, metadataVersion FROM threads WHERE threadId=?").get(uuid(id));
+		const row = db.prepare("SELECT threadId, runnerId, runnerInstanceId, title, createdAt, updatedAt, archivedAt, workspaceId, piSessionId, cwd, metadataVersion FROM threads WHERE threadId=?").get(uuid(id));
 		if (!row) throw new Error("unknown_thread");
 		return row;
 	};
-	const isActive = (row) => !row.archivedAt && !!runners.get(row.runnerId)?.ready && AWAKE.has(liveStates.get(row.threadId)?.state);
-	const describe = (row) => ({ ...row, online: !!runners.get(row.runnerId)?.ready, active: isActive(row),
+	const workspace = (value) => { if (typeof value !== "string" || !value) throw new Error("invalid_workspace"); return value; };
+	const connections = (runnerId) => [...runners.values()].filter((runner) => runner.id === runnerId && runner.ready);
+	const host = (row) => { const runner = hosts.get(row.threadId); return runner?.ready ? runner : undefined; };
+	// Where a runner can host new threads: every directory one of its processes started in or already has a thread in.
+	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").pluck().all(runnerId)])].sort();
+	const isActive = (row) => !row.archivedAt && !!host(row) && AWAKE.has(liveStates.get(row.threadId)?.state);
+	const describe = (row) => ({ ...row, online: !!host(row), active: isActive(row),
 		runtime: liveStates.get(row.threadId) ?? { state: "sleeping", sync: "pending" },
 		latestSnapshotRevision: snapshots.head(row.threadId)?.revision ?? null });
 	const send = (ws, value) => {
@@ -88,8 +95,8 @@ export function createManagedTower(dataDir, {
 		if (!access?.epoch || JSON.stringify(epoch) !== JSON.stringify(access.epoch)) throw new Error("stale_access");
 	}
 	function ensureAccess(row) {
-		const runner = runners.get(row.runnerId);
-		if (!runner?.ready) throw new Error("runner_offline");
+		const runner = host(row);
+		if (!runner) throw new Error("runner_offline");
 		void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
 		const old = accesses.get(row.threadId);
 		if (old?.epoch && old.connectionId === runner.connectionId) return Promise.resolve(old.epoch);
@@ -98,7 +105,7 @@ export function createManagedTower(dataDir, {
 		const epoch = { incarnation, connectionId: runner.connectionId, bootId: runner.bootId, counter: ++epochCounter };
 		access.pending = request(row, "access", { epoch })
 			.then((result) => {
-				if (accesses.get(row.threadId) !== access || !runner.ready || runners.get(row.runnerId) !== runner) throw new Error("access_superseded");
+				if (accesses.get(row.threadId) !== access || !runner.ready || hosts.get(row.threadId) !== runner) throw new Error("access_superseded");
 				if (JSON.stringify(result?.epoch) !== JSON.stringify(epoch)) throw new Error("invalid_access_ack");
 				access.epoch = epoch;
 				access.pending = null; accessChanged(row.threadId); return access.epoch;
@@ -139,8 +146,7 @@ export function createManagedTower(dataDir, {
 			throw error;
 		}
 	}
-	function request(row, operation, fields = {}) {
-		const runner = runners.get(row.runnerId);
+	function request(row, operation, fields = {}, runner = host(row)) {
 		if (!runner?.ready || runner.instanceId !== row.runnerInstanceId) throw new Error("runner_offline_or_instance_mismatch");
 		const requestId = randomUUID();
 		return new Promise((resolve, reject) => {
@@ -151,32 +157,36 @@ export function createManagedTower(dataDir, {
 	}
 	function bind(row, result) {
 		if (result.threadId !== row.threadId || result.runnerInstanceId !== row.runnerInstanceId) throw new Error("thread_binding_mismatch");
-		uuid(result.piSessionId); uuid(result.workspaceId);
-		if (row.piSessionId && (row.piSessionId !== result.piSessionId || row.workspaceId !== result.workspaceId)) throw new Error("session_binding_mismatch");
-		db.prepare("UPDATE threads SET piSessionId=?, workspaceId=? WHERE threadId=?").run(result.piSessionId, result.workspaceId, row.threadId);
+		uuid(result.piSessionId); uuid(result.workspaceId); workspace(result.cwd);
+		if (row.piSessionId && (row.piSessionId !== result.piSessionId || row.workspaceId !== result.workspaceId || (row.cwd && row.cwd !== result.cwd))) throw new Error("session_binding_mismatch");
+		db.prepare("UPDATE threads SET piSessionId=?, workspaceId=?, cwd=? WHERE threadId=?").run(result.piSessionId, result.workspaceId, result.cwd, row.threadId);
 	}
 	function handleRunner(ws, params) {
 		let id, instanceId;
 		try {
 			id = params.get("id"); instanceId = uuid(params.get("instance")); uuid(params.get("boot"));
 			if (!/^[A-Za-z0-9._-]{1,64}$/.test(id)) throw new Error("invalid_runner");
-			if (runners.has(id)) throw new Error("duplicate_runner");
 			const known = db.prepare("SELECT instanceId FROM managed_runners WHERE runnerId=?").get(id);
 			if (known && known.instanceId !== instanceId) throw new Error("runner_instance_mismatch");
 			db.prepare("INSERT OR IGNORE INTO managed_runners VALUES (?,?)").run(id, instanceId);
 		} catch (error) { ws.close(1008, error.message); return; }
-		const runner = { ws, instanceId, bootId: params.get("boot"), ready: false, connectedAt: new Date().toISOString(), connectionId: randomUUID(), pending: new Map() };
-		runners.set(id, runner);
+		const runner = { id, ws, instanceId, bootId: params.get("boot"), ready: false, connectedAt: new Date().toISOString(), connectionId: randomUUID(), pending: new Map() };
+		// A reconnecting process replaces its own stale socket instead of waiting for the heartbeat to reap it.
+		for (const old of runners.values()) if (old.id === id && old.bootId === runner.bootId) { drop(old); old.ws.terminate(); }
+		runners.set(runner.connectionId, runner);
 		send(ws, { type: "welcome", connectionId: runner.connectionId });
 		ws.on("message", (bytes) => {
 			try {
-				if (runners.get(id) !== runner) return;
+				if (runners.get(runner.connectionId) !== runner) return;
 				const message = JSON.parse(bytes.toString());
 				if (message.version !== 1) throw new Error("unsupported_protocol");
 				if (message.type === "inventory") {
 					if (message.piVersion !== "0.85.1" || !Array.isArray(message.threads)) throw new Error("unsupported_capability");
+					runner.cwd = workspace(message.cwd);
+					runner.createSupported = message.createSupported === true;
 					runner.inventory = [];
 					runner.orphans = new Set();
+					for (const [threadId, owner] of hosts) if (owner === runner) hosts.delete(threadId);
 					for (const item of message.threads) {
 						if (item.registration && !db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(uuid(item.threadId))) {
 							const { createKey, title, createdAt } = item.registration;
@@ -192,7 +202,9 @@ export function createManagedTower(dataDir, {
 						}
 						const row = thread(item.threadId);
 						if (row.runnerId !== id || row.runnerInstanceId !== instanceId) throw new Error("inventory_binding_mismatch");
+						if (hosts.has(item.threadId)) throw new Error("thread_already_hosted");
 						bind(row, { ...item, runnerInstanceId: instanceId });
+						hosts.set(item.threadId, runner);
 						liveStates.set(row.threadId, item);
 						runner.inventory.push(item);
 					}
@@ -229,24 +241,27 @@ export function createManagedTower(dataDir, {
 				}
 			} catch (error) { ws.close(1008, error.message.slice(0, 100)); }
 		});
-		ws.on("close", () => {
-			if (runners.get(id) !== runner) return;
-			runners.delete(id);
-			if (runner.ready) onPresence();
-			for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("runner_disconnected_unknown")); }
-			for (const threadId of clients.keys()) if (thread(threadId).runnerId === id) {
-				accesses.delete(threadId); accessChanged(threadId);
-				broadcast(threadId, { type: "resync_required", threadId, runner: "offline" });
-			}
-		});
+		ws.on("close", () => drop(runner));
+	}
+	function drop(runner) {
+		if (runners.get(runner.connectionId) !== runner) return;
+		runners.delete(runner.connectionId);
+		if (runner.ready) onPresence();
+		for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("runner_disconnected_unknown")); }
+		for (const [threadId, owner] of hosts) if (owner === runner) {
+			hosts.delete(threadId);
+			if (!clients.has(threadId)) continue;
+			accesses.delete(threadId); accessChanged(threadId);
+			broadcast(threadId, { type: "resync_required", threadId, runner: "offline" });
+		}
 	}
 	function handleClient(ws, params) {
 		let row;
 		try { row = thread(params.get("thread")); } catch (error) { ws.close(1008, error.message); return; }
 		if (!clients.has(row.threadId)) clients.set(row.threadId, new Set());
 		clients.get(row.threadId).add(ws);
-		send(ws, { type: "state", thread: describe(row), runtime: liveStates.get(row.threadId), online: !!runners.get(row.runnerId)?.ready });
-		if (runners.get(row.runnerId)?.ready) void ensureAccess(row).then((epoch) => send(ws, { type: "access_changed", epoch })).catch(() => send(ws, { type: "access_changed", epoch: null }));
+		send(ws, { type: "state", thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) });
+		if (host(row)) void ensureAccess(row).then((epoch) => send(ws, { type: "access_changed", epoch })).catch(() => send(ws, { type: "access_changed", epoch: null }));
 		ws.on("message", async (bytes) => {
 			let message;
 			try {
@@ -255,7 +270,7 @@ export function createManagedTower(dataDir, {
 				if (message.version !== 1 || !["subscribe", "state", "entries", "prompt", "abort", "extension_ui_response", "command", "sleep"].includes(message.operation)) throw new Error("invalid_command");
 				uuid(message.requestId);
 				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
-				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!runners.get(row.runnerId)?.ready }
+				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) }
 					: ["prompt", "abort", "extension_ui_response"].includes(message.operation)
 					? await execute(row, message)
 					: message.operation === "command" ? command(row.threadId, message.commandId)
@@ -266,7 +281,7 @@ export function createManagedTower(dataDir, {
 		ws.on("close", () => {
 			clients.get(row.threadId)?.delete(ws);
 			if (!clients.get(row.threadId)?.size) clients.delete(row.threadId);
-			if (runners.get(row.runnerId)?.ready) void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
+			if (host(row)) void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
 		});
 	}
 	async function http(req, res, url) {
@@ -278,12 +293,13 @@ export function createManagedTower(dataDir, {
 				res.end(JSON.stringify({ ...snapshots.usage(), databaseBytes: size("tower.sqlite"), walBytes: size("tower.sqlite-wal"), freeBytes: freeBytes(), minFreeBytes, uploads, maxUploads })); return;
 			}
 			if (req.method === "GET" && url.pathname === "/api/managed/runners") {
-				res.end(JSON.stringify(db.prepare("SELECT runnerId AS id FROM managed_runners ORDER BY runnerId").all().map((row) => ({ ...row, online: !!runners.get(row.id)?.ready })))); return;
+				res.end(JSON.stringify(db.prepare("SELECT runnerId AS id FROM managed_runners ORDER BY runnerId").all().map((row) => ({ ...row, online: connections(row.id).length > 0,
+					createSupported: connections(row.id).some((runner) => runner.createSupported), cwds: workspaces(row.id) })))); return;
 			}
 			if (["GET", "PUT"].includes(req.method) && url.pathname.startsWith("/api/managed/snapshots/")) {
 				const row = thread(url.pathname.slice("/api/managed/snapshots/".length));
-				const runner = runners.get(row.runnerId);
-				const authorized = () => runner?.ready && runners.get(row.runnerId) === runner && runner.instanceId === row.runnerInstanceId &&
+				const runner = hosts.get(row.threadId);
+				const authorized = () => runner?.ready && hosts.get(row.threadId) === runner && runner.instanceId === row.runnerInstanceId &&
 					req.headers["x-runner-instance"] === runner.instanceId && req.headers["x-runner-connection"] === runner.connectionId;
 				if (!authorized()) throw new Error("stale_snapshot_connection");
 				if (req.method === "GET") {
@@ -307,9 +323,7 @@ export function createManagedTower(dataDir, {
 					requireDiskSpace();
 					const ack = snapshots.commit(Buffer.concat(chunks), row);
 					if (!row.title) {
-						const first = snapshots.latest(row.threadId).envelope.entries.find((entry) => entry.message?.role === "user");
-						const content = first?.message?.content;
-						const title = (typeof content === "string" ? content : Array.isArray(content) ? content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join(" ") : "").trim().slice(0, 80);
+						const title = firstPrompt(snapshots.latest(row.threadId).envelope.entries).slice(0, 80);
 						if (title) db.prepare("UPDATE threads SET title=? WHERE threadId=? AND title=''").run(title, row.threadId);
 					}
 					res.end(JSON.stringify(ack));
@@ -330,15 +344,14 @@ export function createManagedTower(dataDir, {
 				if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_page_limit");
 				const cursor = url.searchParams.has("cursor") ? JSON.parse(Buffer.from(url.searchParams.get("cursor"), "base64url").toString()) : null;
 				if (cursor && (typeof cursor.updatedAt !== "string" || !uuid(cursor.threadId))) throw new Error("invalid_cursor");
-				const readyRunners = [...runners.entries()].filter(([, runner]) => runner.ready).map(([id]) => id);
-				const awakeThreads = [...liveStates.entries()].filter(([, runtime]) => AWAKE.has(runtime.state)).map(([threadId]) => threadId);
+				const awakeThreads = [...liveStates.entries()].filter(([threadId, runtime]) => AWAKE.has(runtime.state) && host({ threadId })).map(([threadId]) => threadId);
 				const rows = db.prepare(`SELECT threadId FROM threads WHERE (archivedAt IS NOT NULL)=? AND (?='' OR runnerId=?)
 					AND instr(lower(title),lower(?))>0 AND (? IS NULL OR updatedAt<? OR (updatedAt=? AND threadId<?))
-					AND (?=0 OR (archivedAt IS NULL AND runnerId IN (SELECT value FROM json_each(?)) AND threadId IN (SELECT value FROM json_each(?))))
+					AND (?=0 OR (archivedAt IS NULL AND threadId IN (SELECT value FROM json_each(?))))
 					ORDER BY updatedAt DESC,threadId DESC LIMIT ?`).all(url.searchParams.get("archived") === "true" ? 1 : 0,
 					url.searchParams.get("runner") ?? "", url.searchParams.get("runner") ?? "", url.searchParams.get("q") ?? "",
 					cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.threadId ?? null,
-					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(readyRunners), JSON.stringify(awakeThreads), limit + 1);
+					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(awakeThreads), limit + 1);
 				const page = rows.slice(0, limit).map(({ threadId }) => describe(thread(threadId)));
 				const last = page.at(-1);
 				res.end(JSON.stringify({ threads: page, nextCursor: rows.length > limit ? Buffer.from(JSON.stringify({ updatedAt: last.updatedAt, threadId: last.threadId })).toString("base64url") : null }));
@@ -346,7 +359,7 @@ export function createManagedTower(dataDir, {
 			}
 			if (req.method === "GET" && url.pathname.startsWith("/api/threads/")) {
 				const row = thread(url.pathname.slice("/api/threads/".length));
-				if (runners.get(row.runnerId)?.ready) liveStates.set(row.threadId, await request(row, "state"));
+				if (host(row)) liveStates.set(row.threadId, await request(row, "state"));
 				res.end(JSON.stringify(describe(row))); return;
 			}
 			const metadataPath = /^\/api\/threads\/([^/]+)$/.exec(url.pathname);
@@ -380,7 +393,7 @@ export function createManagedTower(dataDir, {
 					(input.archived !== undefined && typeof input.archived !== "boolean")) throw new Error("invalid_metadata");
 				metadataChanging.add(row.threadId);
 				try {
-					if (input.archived === true) {
+					if (input.archived === true && host(row)) { // An unhosted thread has no runtime to be busy.
 						const runtime = await request(row, "state");
 						if (!["idle", "sleeping"].includes(runtime.state)) throw new Error("runtime_busy");
 					}
@@ -393,8 +406,9 @@ export function createManagedTower(dataDir, {
 			}
 			const createKey = uuid(input.idempotencyKey);
 			if (typeof input.runnerId !== "string" || (input.title !== undefined && typeof input.title !== "string") || (input.title?.length ?? 0) > 200) throw new Error("invalid_create");
-			const runner = runners.get(input.runnerId);
-			if (!runner?.ready) throw new Error("runner_offline");
+			const runner = connections(input.runnerId).find((candidate) => candidate.createSupported);
+			if (!runner) throw new Error(connections(input.runnerId).length ? "create_needs_managed_threads_runner" : "runner_offline");
+			if (input.cwd !== undefined && !workspaces(input.runnerId).includes(input.cwd)) throw new Error("unknown_workspace");
 			let row = db.prepare("SELECT * FROM threads WHERE createKey=?").get(createKey);
 			if (row && (row.runnerId !== input.runnerId || row.createTitle !== (input.title ?? ""))) throw new Error("create_key_conflict");
 			if (!row) {
@@ -404,7 +418,8 @@ export function createManagedTower(dataDir, {
 					.run(threadId, createKey, input.runnerId, runner.instanceId, input.title ?? "", input.title ?? "", now, now);
 				row = thread(threadId);
 			}
-			bind(row, await request(row, "prepare"));
+			bind(row, await request(row, "prepare", { cwd: input.cwd }, runner));
+			hosts.set(row.threadId, runner);
 			void request(thread(row.threadId), "sync").catch(() => {});
 			res.writeHead(201).end(JSON.stringify(thread(row.threadId)));
 		} catch (error) {
@@ -413,12 +428,16 @@ export function createManagedTower(dataDir, {
 	}
 	return { http, isManagedSession: (name) => !!db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(name),
 		// Active threads double as the runner's sessions on the home page.
-		presence: () => [...runners.entries()].filter(([, runner]) => runner.ready).map(([id, runner]) => ({ id, connectedAt: runner.connectedAt,
-			sessions: db.prepare("SELECT threadId, runnerId, title, archivedAt FROM threads WHERE runnerId=? AND archivedAt IS NULL ORDER BY updatedAt DESC, threadId DESC").all(id)
-				.filter(isActive).map((row) => {
-					const state = liveStates.get(row.threadId).state;
-					return { name: row.title || row.threadId, threadId: row.threadId, state: state === "starting" ? "opening" : state, managed: true };
-				}) })),
+		presence: () => {
+			const machines = new Map(); // runner id -> earliest ready connection time
+			for (const runner of runners.values()) if (runner.ready && !(machines.get(runner.id) <= runner.connectedAt)) machines.set(runner.id, runner.connectedAt);
+			return [...machines].map(([id, connectedAt]) => ({ id, connectedAt,
+				sessions: db.prepare("SELECT threadId, runnerId, title, archivedAt FROM threads WHERE runnerId=? AND archivedAt IS NULL ORDER BY updatedAt DESC, threadId DESC").all(id)
+					.filter(isActive).map((row) => {
+						const state = liveStates.get(row.threadId).state;
+						return { name: row.title || row.threadId, threadId: row.threadId, state: state === "starting" ? "opening" : state, managed: true };
+					}) }));
+		},
 		routes: { "/managed/runner": handleRunner, "/managed/client": handleClient },
 		close() {
 			clearInterval(checkpointTimer);

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // pi-runner: registers with a pi-tower and runs one `pi --mode rpc` child per opened session, killed when the tower closes it.
 import { spawn } from "node:child_process";
-import { hostname } from "node:os";
-import { readTokenFile } from "./lib.mjs";
+import { homedir, hostname } from "node:os";
+import { resolve } from "node:path";
+import { loadToken } from "./lib.mjs";
 import { ManagedRunner } from "./managed-runner.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -14,19 +15,22 @@ function parseArgs(argv) {
 		token: process.env.PI_TOWER_TOKEN,
 		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
 		piArgs: [],
-		dataDir: process.env.PI_RUNNER_DATA_DIR,
+		dataDir: process.env.PI_RUNNER_DATA_DIR ?? resolve(homedir(), ".pi-tower"),
+		interactive: undefined, // Interactive unless a headless mode is chosen below.
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
-			console.log("Interactive TUI + web: --interactive --data-dir <path> [--thread <thread UUID>]\nStart in the workspace; --thread resumes its original cwd. One process per runner data directory.");
-			console.log("pi-runner --hq <ws(s)://host> [--id name] [--token t | --token-file path] [-- <pi args>]\nManaged: --managed-threads --data-dir <path> [--pi-package <npm package directory>]\n--managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_RUNNER_DATA_DIR supplies --data-dir. Managed mode rejects passthrough pi args.\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
+			console.log("pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path]\nToken: --token, --token-file, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE, else ~/.pi-tower/token. --id defaults to the hostname.\nDefault mode is the interactive TUI + web thread [--thread <UUID> | -c | -r]: start in the workspace; like pi, -c/--continue resumes this directory's newest thread, -r/--resume picks one of them, --thread names a UUID. Every thread keeps its original cwd.\n--data-dir defaults to ~/.pi-tower (or PI_RUNNER_DATA_DIR); one process per data directory.\nHeadless: --managed-threads (browser-created threads) or --no-interactive [-- <pi args>] (legacy relay; pi args imply it). Managed modes reject pi args.\n--pi-package <npm package directory>; --managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--hq") opts.hq = argv[++i];
 		else if (argv[i] === "--id") opts.id = argv[++i];
-		else if (argv[i] === "--managed-threads") opts.managed = true;
-		else if (argv[i] === "--interactive") { opts.interactive = true; opts.managed = true; }
+		else if (argv[i] === "--managed-threads") { opts.managed = true; opts.interactive ??= false; }
+		else if (argv[i] === "--interactive") opts.interactive = true;
+		else if (argv[i] === "--no-interactive") opts.interactive = false;
 		else if (argv[i] === "--thread") opts.threadId = argv[++i];
+		else if (argv[i] === "--continue" || argv[i] === "-c") opts.continueRecent = true;
+		else if (argv[i] === "--resume" || argv[i] === "-r") opts.resume = true;
 		else if (argv[i] === "--data-dir") opts.dataDir = argv[++i];
 		else if (argv[i] === "--pi-package") opts.piPackage = argv[++i];
 		else if (argv[i] === "--managed-idle-ms") opts.idleTtlMs = Number(argv[++i]);
@@ -39,28 +43,31 @@ function parseArgs(argv) {
 			opts.token = undefined;
 		} else if (argv[i] === "--") {
 			opts.piArgs = argv.slice(i + 1);
+			opts.interactive ??= false;
 			break;
 		} else {
 			console.error(
-				`unknown option ${argv[i]}\nusage: pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path] [-- <pi args>]`,
+				`unknown option ${argv[i]}\nusage: pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path] [--managed-threads | --no-interactive [-- <pi args>]]`,
 			);
 			process.exit(1);
 		}
 	}
-	if (opts.tokenFile) {
-		try {
-			opts.token = readTokenFile(opts.tokenFile);
-		} catch (error) {
-			console.error(error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		}
-	}
-	if (!opts.hq || !opts.token) {
-		console.error("missing --hq or token (--token / --token-file / PI_TOWER_TOKEN / PI_TOWER_TOKEN_FILE)");
+	opts.interactive ??= true;
+	if (opts.interactive) opts.managed = true;
+	try {
+		opts.token = loadToken(opts);
+	} catch (error) {
+		console.error(error.message);
 		process.exit(1);
 	}
-	if (opts.managed && (!opts.dataDir || opts.piArgs.length)) throw new Error("managed mode requires --data-dir and rejects passthrough pi args; configure pi through its settings");
-	if (opts.threadId && !opts.interactive) throw new Error("--thread requires --interactive");
+	if (!opts.hq) {
+		console.error("missing --hq <ws(s)://host[:port]>");
+		process.exit(1);
+	}
+	if (opts.managed && opts.piArgs.length) throw new Error("managed mode rejects passthrough pi args; configure pi through its settings");
+	const picks = [opts.threadId, opts.continueRecent, opts.resume].filter(Boolean).length;
+	if (picks && !opts.interactive) throw new Error("--thread, --continue and --resume require --interactive");
+	if (picks > 1) throw new Error("choose one of --thread, --continue, --resume");
 	if (opts.idleTtlMs !== undefined && (!Number.isSafeInteger(opts.idleTtlMs) || opts.idleTtlMs < 0)) throw new Error("invalid managed idle TTL");
 	if (opts.maxAwake !== undefined && (!Number.isSafeInteger(opts.maxAwake) || opts.maxAwake < 1)) throw new Error("invalid awake limit");
 	return opts;
@@ -73,6 +80,7 @@ if (options.interactive) {
 }
 const { hq, id, token, piArgs } = options;
 const managed = options.managed ? new ManagedRunner(options) : null;
+managed?.hostAll();
 managed?.connect({ hq, token });
 // { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
 const wsOpts = { headers: { authorization: `Bearer ${token}` } };

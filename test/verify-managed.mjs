@@ -18,6 +18,8 @@ mkdirSync(resolve(temp, "agent/extensions"));
 cpSync(resolve(root, "test/compat/managed-extension.mjs"), resolve(temp, "agent/extensions/test.js"));
 writeFileSync(resolve(temp, "agent/settings.json"), JSON.stringify({ defaultProvider: "phase1", defaultModel: "faux-1", compaction: { enabled: false } }));
 const log = resolve(temp, "children.jsonl");
+const workspace = resolve(temp, "workspace");
+const other = resolve(temp, "other");
 const env = { PATH: `${dirname(process.execPath)}:${process.env.PATH}`, HOME: resolve(temp, "home"), PI_CODING_AGENT_DIR: resolve(temp, "agent"),
 	PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, MANAGED_TEST_LOG: log };
 const token = "isolated-managed-test";
@@ -51,9 +53,9 @@ async function stop(child, signal = "SIGTERM") {
 	processes.delete(child);
 	if (signal === "SIGTERM") assert.equal(child.exitCode, 0, child.log);
 }
-async function create(key, title = "測試") {
+async function create(key, title = "測試", cwd) {
 	const response = await fetch(`http://127.0.0.1:${port}/api/threads`, { method: "POST", headers: { authorization: `Bearer ${token}` },
-		body: JSON.stringify({ idempotencyKey: key, runnerId: "managed-test", title }) });
+		body: JSON.stringify({ idempotencyKey: key, runnerId: "managed-test", title, cwd }) });
 	return { status: response.status, body: await response.json() };
 }
 async function attach(threadId, drive = true) {
@@ -89,7 +91,23 @@ try {
 	const legacy = new WebSocket(`ws://127.0.0.1:${port}/attach?runner=managed-test&session=${id}`, { headers: { authorization: `Bearer ${token}` } });
 	assert.equal((await once(legacy, "close"))[0].reason, "managed_namespace");
 	const duplicateRegistration = new WebSocket(`ws://127.0.0.1:${port}/managed/runner?id=managed-test&instance=${randomUUID()}&boot=${randomUUID()}`, { headers: { authorization: `Bearer ${token}` } });
-	assert.equal((await once(duplicateRegistration, "close"))[0].reason, "duplicate_runner");
+	assert.equal((await once(duplicateRegistration, "close"))[0].reason, "runner_instance_mismatch");
+	// Another process of the same machine is another connection; it may not host a thread the wrapper already serves.
+	const instanceId = readJson(resolve(temp, "data/instance.json")).instanceId;
+	const connect = (boot, inventory) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${port}/managed/runner?id=managed-test&instance=${instanceId}&boot=${boot}`, { headers: { authorization: `Bearer ${token}` } });
+		sockets.add(ws);
+		const confirmed = new Promise((done) => { ws.onmessage = ({ data }) => {
+			const frame = JSON.parse(data);
+			if (frame.type === "welcome") ws.send(JSON.stringify({ version: 1, type: "inventory", piVersion: "0.85.1", cwd: other, threads: inventory }));
+			if (frame.type === "inventory_ready") ws.send(JSON.stringify({ version: 1, type: "reconciled", connectionId: frame.connectionId }));
+			if (frame.type === "inventory_confirmed") done();
+		}; });
+		return { ws, confirmed };
+	};
+	const rival = connect(randomUUID(), [{ threadId: id, piSessionId: created.piSessionId, workspaceId: created.workspaceId, cwd: workspace, state: "sleeping" }]);
+	assert.equal((await once(rival.ws, "close"))[0].reason, "thread_already_hosted");
+	sockets.delete(rival.ws);
 	// A runner that only speaks the managed protocol (interactive mode) must still show on the home page.
 	// connection: close keeps these out of the keep-alive pool, which the tower restart below would otherwise reset.
 	const state = () => fetch(`http://127.0.0.1:${port}/api/state`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
@@ -110,7 +128,7 @@ try {
 	sockets.add(managedOnly);
 	const confirmed = new Promise((resolve) => { managedOnly.onmessage = ({ data }) => {
 		const frame = JSON.parse(data);
-		if (frame.type === "welcome") managedOnly.send(JSON.stringify({ version: 1, type: "inventory", piVersion: "0.85.1", threads: [] }));
+		if (frame.type === "welcome") managedOnly.send(JSON.stringify({ version: 1, type: "inventory", piVersion: "0.85.1", cwd: workspace, threads: [] }));
 		if (frame.type === "inventory_ready") managedOnly.send(JSON.stringify({ version: 1, type: "reconciled", connectionId: frame.connectionId }));
 		if (frame.type === "inventory_confirmed") resolve();
 	}; });
@@ -125,6 +143,19 @@ try {
 	assert.deepEqual(legacyListing.map((item) => item.id), ["managed-test"], "legacy /runners contract unchanged");
 	managedOnly.close(); sockets.delete(managedOnly);
 	await until(async () => !(await state()).runners.some((item) => item.id === "managed-only"), "managed-only runner leaves the home page");
+	// Two processes of one machine: one home page entry, both directories offered, and a same-boot reconnect replaces its stale socket.
+	const boot = randomUUID();
+	const first = connect(boot, []);
+	await first.confirmed;
+	assert.deepEqual((await state()).runners.map((item) => item.id), ["managed-test"]);
+	const runnersListing = () => fetch(`http://127.0.0.1:${port}/api/managed/runners`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
+	assert.deepEqual((await runnersListing()).find((item) => item.id === "managed-test").cwds, [other, workspace].sort());
+	const second = connect(boot, []);
+	assert.equal((await once(first.ws, "close"))[0].code, 1006, "same boot supersedes the old socket");
+	await second.confirmed;
+	second.ws.close(); sockets.delete(second.ws); sockets.delete(first.ws);
+	await until(async () => !(await runnersListing()).find((item) => item.id === "managed-test").cwds.includes(other), "sibling directory leaves with its connection");
+	console.log("ok machine: several connections per runner id, one host per thread, same-boot reconnect supersedes");
 	await sse.cancel();
 	assert.equal((await fetch(`http://127.0.0.1:${port}/api/threads`)).status, 401);
 	let client = await attach(id);
@@ -291,6 +322,21 @@ try {
 	assert.ok((await brokenClient.request("prompt", { message: "must not run" }, true)).error);
 	assert.equal(starts().length, 2, "invalid sessions must fail before child startup");
 	close(brokenClient);
+	// The runner now runs from "other", yet the tower shows every thread's own cwd and can place a new one in "workspace".
+	const authorized = (path) => fetch(`http://127.0.0.1:${port}${path}`, { headers: { authorization: `Bearer ${token}`, connection: "close" } }).then((response) => response.json());
+	assert.equal((await authorized(`/api/threads/${id}`)).cwd, workspace);
+	assert.deepEqual((await authorized("/api/managed/runners")).find((item) => item.id === "managed-test").cwds, [resolve(temp, "other"), workspace].sort());
+	assert.equal((await create(randomUUID(), "elsewhere", resolve(temp, "home"))).body.error, "unknown_workspace");
+	const placed = (await create(randomUUID(), "placed", workspace)).body;
+	assert.equal(placed.cwd, workspace);
+	const placedClient = await attach(placed.threadId);
+	await placedClient.request("prompt", { message: "where am I" });
+	await until(async () => (await placedClient.request("state")).state === "idle", "placed thread settled");
+	assert.equal((await placedClient.request("entries")).entries.find((e) => e.customType === "phase1-cwd").data.cwd, workspace);
+	assert.equal(starts().at(-1).cwd, workspace);
+	await placedClient.request("sleep");
+	close(placedClient);
+	console.log("ok workspace: threads keep their cwd on the tower; create places a thread in a runner-known directory only");
 	const viewer = await attach(id, false);
 	assert.deepEqual(viewer.epoch, client.epoch, "both devices have the same nonexclusive access");
 	assert.equal((await viewer.request("prompt", { message: "missing epoch", epoch: null }, true)).error, "stale_access");
