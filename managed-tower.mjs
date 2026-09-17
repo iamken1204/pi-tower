@@ -54,7 +54,7 @@ export function createManagedTower(dataDir, {
 	const requireDiskSpace = () => { if (freeBytes() < minFreeBytes) throw new Error("disk_space_low"); };
 	const command = (threadId, commandId) => {
 		const row = db.prepare("SELECT receipt FROM managed_commands WHERE threadId=? AND commandId=?").get(threadId, uuid(commandId));
-		return row ? JSON.parse(row.receipt) : null;
+		return row ? { actor: null, ...JSON.parse(row.receipt) } : null;
 	};
 	for (const row of db.prepare("SELECT threadId,commandId,receipt FROM managed_commands").all()) {
 		const receipt = JSON.parse(row.receipt);
@@ -168,7 +168,7 @@ export function createManagedTower(dataDir, {
 		try {
 			const epoch = await ensureAccess(target);
 			if (unavailable(thread(target.threadId))) return changedTask(collaboration.transition(task.taskId, "rejected"));
-			await execute(target, { operation: "prompt", message: task.prompt, behavior: "followUp", task, commandId: task.commandId, epoch });
+			await execute(target, { operation: "prompt", message: task.prompt, behavior: "followUp", task, commandId: task.commandId, epoch }, { kind: "thread", threadId: source.threadId, runnerId: source.runnerId });
 			return collaboration.get(task.taskId);
 		} catch {
 			return changedTask(collaboration.transition(task.taskId, "unknown"));
@@ -200,7 +200,7 @@ export function createManagedTower(dataDir, {
 		accesses.set(row.threadId, access);
 		return access.pending;
 	}
-	function saveReceipt(threadId, receipt) {
+	function saveReceipt(threadId, receipt, actor = null) {
 		uuid(receipt.commandId);
 		if (payloadHash(receipt.payload) !== receipt.payloadHash || !["received", "dispatching", "accepted", "rejected", "settled", "unknown"].includes(receipt.status)) throw new Error("invalid_receipt");
 		if (receipt.payload.task) {
@@ -213,13 +213,16 @@ export function createManagedTower(dataDir, {
 		const old = command(threadId, receipt.commandId);
 		if (old && old.payloadHash !== receipt.payloadHash) throw new Error("command_payload_conflict");
 		if (old && ["settled", "rejected"].includes(old.status)) return old;
+		// The first durable record names who issued the command; later runner updates cannot claim or change it.
+		receipt = { ...receipt, actor: old ? old.actor : actor };
 		db.prepare("INSERT INTO managed_commands VALUES (?,?,?,?) ON CONFLICT(threadId,commandId) DO UPDATE SET receipt=excluded.receipt")
 			.run(threadId, receipt.commandId, receipt.payloadHash, JSON.stringify(receipt));
 		if (["accepted", "rejected", "settled", "unknown"].includes(receipt.status) && db.prepare("SELECT 1 FROM managed_collaboration_tasks WHERE command_id=? AND target_thread_id=?").get(receipt.commandId, threadId)) changedTask(collaboration.updateByCommand(threadId, receipt));
 		broadcast(threadId, { type: "command_status", threadId, receipt });
 		return receipt;
 	}
-	async function execute(row, input) {
+	async function execute(row, input, actor) {
+		if (!actor) throw new Error("actor_required");
 		row = thread(row.threadId);
 		if (input.operation === "prompt") requireDiskSpace();
 		if (metadataChanging.has(row.threadId) || restores.has(row.threadId)) throw new Error("metadata_update_in_progress");
@@ -231,7 +234,7 @@ export function createManagedTower(dataDir, {
 			if (old.payloadHash !== payloadHash(payload)) throw new Error("command_payload_conflict");
 			return old; // Query/reconcile is separate; never resend an uncertain command automatically.
 		}
-		const receipt = saveReceipt(row.threadId, { commandId: input.commandId, payload, payloadHash: payloadHash(payload), epoch: input.epoch, bootId: input.epoch.bootId, status: "received" });
+		const receipt = saveReceipt(row.threadId, { commandId: input.commandId, payload, payloadHash: payloadHash(payload), epoch: input.epoch, bootId: input.epoch.bootId, status: "received" }, actor);
 		if (input.operation === "prompt") db.prepare("UPDATE threads SET updatedAt=?,title=CASE WHEN title='' THEN ? ELSE title END WHERE threadId=?")
 			.run(new Date().toISOString(), payload.message.trim().slice(0, 80), row.threadId);
 		try { return saveReceipt(row.threadId, await request(row, input.operation, { ...payload, commandId: input.commandId, epoch: input.epoch })); }
@@ -388,7 +391,7 @@ export function createManagedTower(dataDir, {
 				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
 				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) }
 					: ["prompt", "abort", "extension_ui_response"].includes(message.operation)
-					? await execute(row, message)
+					? await execute(row, message, { kind: "user" })
 					: message.operation === "command" ? command(row.threadId, message.commandId)
 					: await request(row, message.operation, message.operation === "sleep" ? { epoch: message.epoch } : {});
 				send(ws, { type: "result", requestId: message.requestId, result });

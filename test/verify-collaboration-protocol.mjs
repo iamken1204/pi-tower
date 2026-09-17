@@ -116,6 +116,13 @@ try {
 	assert.equal((await a.call("thread_delegate", { targetThreadId: b.threadId, requestId, prompt: "do beta" })).taskId, delegated.taskId);
 	assert.equal(b.prompts.length, 1, "same request is deduplicated");
 	assert.equal((await a.call("thread_delegate", { targetThreadId: b.threadId, requestId, prompt: "different" })).error, "collaboration_request_conflict");
+	const receiptOf = async (threadId, commandId) => (await fetch(`http://127.0.0.1:${port}/api/threads/${threadId}/commands/${commandId}`, { headers: { authorization: `Bearer ${token}` } })).json();
+	const delegatedReceipt = await receiptOf(b.threadId, b.prompts[0].commandId);
+	assert.equal(delegatedReceipt.status, "accepted");
+	assert.deepEqual(delegatedReceipt.actor, { kind: "thread", threadId: a.threadId, runnerId: "runner-a" }, "receipt names the authenticated source thread and keeps it through the runner's update");
+	const forged = { commandId: randomUUID(), payload: commandPayload({ operation: "prompt", message: "forged" }), epoch: {}, bootId: b.bootId, status: "accepted", actor: { kind: "user", subject: "forged" } };
+	b.send({ type: "command_status", threadId: b.threadId, receipt: { ...forged, payloadHash: payloadHash(forged.payload) } });
+	assert.equal((await until(() => receiptOf(b.threadId, forged.commandId), "runner-originated receipt")).actor, null, "a runner cannot name the actor of a command Tower never admitted");
 
 	const premature = await b.call("thread_report", { taskId: randomUUID(), outcome: "completed", summary: "no" });
 	assert.equal(premature.error, "unknown_collaboration_task");

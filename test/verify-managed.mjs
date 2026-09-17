@@ -182,7 +182,9 @@ try {
 	await until(async () => JSON.stringify((await state()).runners.find((item) => item.id === "managed-test").sessions) === JSON.stringify([{ name: "測試", threadId: id, state: "idle", managed: true }]), "an awake thread is a home page session");
 	assert.deepEqual((await activeList()).threads.map((row) => row.threadId), [id]);
 	assert.deepEqual((await history(id)).entries, before.entries);
-	assert.equal((await client.request("prompt", { message: "first", commandId: firstCommand })).status, "settled");
+	const firstReceipt = await client.request("prompt", { message: "first", commandId: firstCommand });
+	assert.equal(firstReceipt.status, "settled");
+	assert.deepEqual(firstReceipt.actor, { kind: "user" }, "browser command receipt records the issuing side");
 	assert.equal((await client.request("prompt", { message: "changed", commandId: firstCommand }, true)).error, "command_payload_conflict");
 	assert.deepEqual(await client.request("entries"), before, "command replay cannot append another message");
 	assert.equal(before.entries.filter((e) => e.message?.role === "assistant").length, 1);
