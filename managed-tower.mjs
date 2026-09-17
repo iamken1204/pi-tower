@@ -18,6 +18,7 @@ export function createManagedTower(dataDir, {
 	maxUploads = Number(process.env.PI_TOWER_MAX_UPLOADS ?? 2),
 	maxViewerBuffer = Number(process.env.PI_TOWER_VIEWER_BUFFER_BYTES ?? 1024 * 1024),
 	onPresence = () => {}, // Fires when a runner's readiness or a thread's runtime state changes.
+	policy = () => true, // (principal, action, resource) -> whether a person or thread may act; the default lets every token holder do everything.
 } = {}) {
 	for (const value of [maxSnapshotBytes, maxTotalBytes, minFreeBytes, maxUploads, maxViewerBuffer]) if (!Number.isSafeInteger(value) || value < 1) throw new Error("invalid_managed_limit");
 	privateDirectory(dataDir);
@@ -81,6 +82,8 @@ export function createManagedTower(dataDir, {
 	// Where a runner can host new threads: every directory one of its processes started in or already has a thread in.
 	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").pluck().all(runnerId)])].sort();
 	const isActive = (row) => !row.archivedAt && !!host(row) && AWAKE.has(liveStates.get(row.threadId)?.state);
+	const permit = (principal, action, resource) => { if (!policy(principal, action, resource)) throw Object.assign(new Error("forbidden"), { status: 403 }); };
+	const visibleThread = (principal, threadId) => { const row = thread(threadId); permit(principal, "read", describe(row)); return row; };
 	const describe = (row) => ({ ...row, project: row.cwd ? basename(row.cwd) || row.cwd : null, online: !!host(row), active: isActive(row),
 		canDelegate: !unavailable(row), unavailableReason: unavailable(row),
 		runtime: liveStates.get(row.threadId) ?? { state: "sleeping", sync: "pending" },
@@ -123,6 +126,7 @@ export function createManagedTower(dataDir, {
 	}
 	// Tool calls arrive over the authenticated runner channel; the source thread is the one the connection hosts.
 	async function collaborationCall(source, operation, input) {
+		const who = { kind: "thread", threadId: source.threadId, runnerId: source.runnerId };
 		if (operation === "thread_metadata") {
 			source = thread(source.threadId);
 			if (input.title !== undefined) {
@@ -144,7 +148,7 @@ export function createManagedTower(dataDir, {
 			const rows = [...hosts.entries()].filter(([threadId, owner]) => owner.ready && threadId !== source.threadId && threadId > (input.cursor ?? ""))
 				.sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))
 				.map(([threadId]) => describe(thread(threadId)))
-				.filter((row) => !row.archivedAt &&
+				.filter((row) => !row.archivedAt && policy(who, "read", row) &&
 					(input.project === undefined || row.project === input.project) &&
 					(input.hostname === undefined || row.hostname === input.hostname) &&
 					(input.runnerId === undefined || row.runnerId === input.runnerId))
@@ -160,6 +164,7 @@ export function createManagedTower(dataDir, {
 		}
 		if (operation !== "thread_delegate") throw new Error("invalid_collaboration_operation");
 		const target = thread(input.targetThreadId);
+		permit(who, "prompt", describe(target));
 		const { task, created } = collaboration.create({ sourceThreadId: source.threadId, targetThreadId: target.threadId, targetRunnerInstanceId: target.runnerInstanceId,
 			requestId: input.requestId, prompt: input.prompt, sourceRunnerId: source.runnerId, targetRunnerId: target.runnerId, sourceName: source.title, targetName: target.title });
 		if (!created) return task;
@@ -168,7 +173,7 @@ export function createManagedTower(dataDir, {
 		try {
 			const epoch = await ensureAccess(target);
 			if (unavailable(thread(target.threadId))) return changedTask(collaboration.transition(task.taskId, "rejected"));
-			await execute(target, { operation: "prompt", message: task.prompt, behavior: "followUp", task, commandId: task.commandId, epoch }, { kind: "thread", threadId: source.threadId, runnerId: source.runnerId });
+			await execute(target, { operation: "prompt", message: task.prompt, behavior: "followUp", task, commandId: task.commandId, epoch }, who);
 			return collaboration.get(task.taskId);
 		} catch {
 			return changedTask(collaboration.transition(task.taskId, "unknown"));
@@ -375,7 +380,7 @@ export function createManagedTower(dataDir, {
 	}
 	function handleClient(ws, params, principal) {
 		let row;
-		try { row = thread(params.get("thread")); } catch (error) { ws.close(1008, error.message); return; }
+		try { row = visibleThread(principal, params.get("thread")); } catch (error) { ws.close(1008, error.message); return; }
 		if (!clients.has(row.threadId)) clients.set(row.threadId, new Set());
 		clients.get(row.threadId).add(ws);
 		send(ws, { type: "state", thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) });
@@ -388,7 +393,7 @@ export function createManagedTower(dataDir, {
 				if (message.task !== undefined) throw new Error("invalid_command"); // Only Tower-created tasks reach runners.
 				if (message.version !== 1 || !["subscribe", "state", "entries", "prompt", "abort", "extension_ui_response", "command", "sleep"].includes(message.operation)) throw new Error("invalid_command");
 				uuid(message.requestId);
-				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
+				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) { permit(principal, message.operation, describe(row)); requireAccess(row, message.epoch); }
 				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) }
 					: ["prompt", "abort", "extension_ui_response"].includes(message.operation)
 					? await execute(row, message, principal)
@@ -403,7 +408,7 @@ export function createManagedTower(dataDir, {
 			if (host(row)) void request(row, "viewers", { count: clients.get(row.threadId)?.size ?? 0 }).catch(() => {});
 		});
 	}
-	async function http(req, res, url) {
+	async function http(req, res, url, principal) {
 		res.setHeader("content-type", "application/json");
 		res.setHeader("cache-control", "no-store");
 		try {
@@ -412,7 +417,7 @@ export function createManagedTower(dataDir, {
 				res.end(JSON.stringify({ ...snapshots.usage(), databaseBytes: size("tower.sqlite"), walBytes: size("tower.sqlite-wal"), freeBytes: freeBytes(), minFreeBytes, uploads, maxUploads })); return;
 			}
 			if (req.method === "GET" && url.pathname === "/api/managed/runners") {
-				res.end(JSON.stringify(db.prepare("SELECT runnerId AS id FROM managed_runners ORDER BY runnerId").all().map((row) => ({ ...row, online: connections(row.id).length > 0,
+				res.end(JSON.stringify(db.prepare("SELECT runnerId AS id FROM managed_runners ORDER BY runnerId").all().filter((row) => policy(principal, "read", { runnerId: row.id })).map((row) => ({ ...row, online: connections(row.id).length > 0,
 					createSupported: connections(row.id).some((runner) => runner.createSupported), cwds: workspaces(row.id) })))); return;
 			}
 			if (["GET", "PUT"].includes(req.method) && url.pathname.startsWith("/api/managed/snapshots/")) {
@@ -452,18 +457,18 @@ export function createManagedTower(dataDir, {
 			}
 			const tasksPath = /^\/api\/threads\/([^/]+)\/tasks$/.exec(url.pathname);
 			if (req.method === "GET" && tasksPath) {
-				const row = thread(tasksPath[1]), filters = Object.fromEntries(url.searchParams);
+				const row = visibleThread(principal, tasksPath[1]), filters = Object.fromEntries(url.searchParams);
 				if (filters.limit !== undefined) filters.limit = Number(filters.limit);
 				res.end(JSON.stringify(collaboration.list(row.threadId, filters))); return;
 			}
 			const history = /^\/api\/threads\/([^/]+)\/history$/.exec(url.pathname);
 			if (req.method === "GET" && history) {
-				const row = thread(history[1]);
+				const row = visibleThread(principal, history[1]);
 				const revision = url.searchParams.has("revision") ? JSON.parse(url.searchParams.get("revision")) : undefined;
 				res.end(JSON.stringify(snapshots.history(row.threadId, revision, Number(url.searchParams.get("cursor") ?? 0), Number(url.searchParams.get("limit") ?? 100)))); return;
 			}
 			const receiptPath = /^\/api\/threads\/([^/]+)\/commands\/([^/]+)$/.exec(url.pathname);
-			if (req.method === "GET" && receiptPath) { thread(receiptPath[1]); res.end(JSON.stringify(command(receiptPath[1], receiptPath[2]))); return; }
+			if (req.method === "GET" && receiptPath) { visibleThread(principal, receiptPath[1]); res.end(JSON.stringify(command(receiptPath[1], receiptPath[2]))); return; }
 			if (req.method === "GET" && url.pathname === "/api/threads") {
 				const limit = Number(url.searchParams.get("limit") ?? 50);
 				if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_page_limit");
@@ -477,13 +482,14 @@ export function createManagedTower(dataDir, {
 					url.searchParams.get("runner") ?? "", url.searchParams.get("runner") ?? "", url.searchParams.get("q") ?? "",
 					cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.threadId ?? null,
 					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(awakeThreads), limit + 1);
-				const page = rows.slice(0, limit).map(({ threadId }) => describe(thread(threadId)));
-				const last = page.at(-1);
+				const slice = rows.slice(0, limit).map(({ threadId }) => describe(thread(threadId)));
+				const last = slice.at(-1); // The cursor continues from the last row fetched, hidden or not.
+				const page = slice.filter((row) => policy(principal, "read", row));
 				res.end(JSON.stringify({ threads: page, nextCursor: rows.length > limit ? Buffer.from(JSON.stringify({ updatedAt: last.updatedAt, threadId: last.threadId })).toString("base64url") : null }));
 				return;
 			}
 			if (req.method === "GET" && url.pathname.startsWith("/api/threads/")) {
-				const row = thread(url.pathname.slice("/api/threads/".length));
+				const row = visibleThread(principal, url.pathname.slice("/api/threads/".length));
 				if (host(row)) liveStates.set(row.threadId, await request(row, "state"));
 				res.end(JSON.stringify(describe(row))); return;
 			}
@@ -495,7 +501,8 @@ export function createManagedTower(dataDir, {
 			for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 4096) throw new Error("request_too_large"); }
 			const input = JSON.parse(body);
 			if (restorePath) {
-				const row = thread(restorePath[1]);
+				const row = visibleThread(principal, restorePath[1]);
+				permit(principal, "restore", describe(row));
 				if (input.confirmed !== true) throw new Error("restore_confirmation_required");
 				if (restores.has(row.threadId) || metadataChanging.has(row.threadId)) throw new Error("restore_in_progress");
 				const latest = snapshots.latest(row.threadId);
@@ -511,7 +518,8 @@ export function createManagedTower(dataDir, {
 				} finally { restores.delete(row.threadId); }
 			}
 			if (req.method === "PATCH") {
-				const row = thread(metadataPath[1]);
+				const row = visibleThread(principal, metadataPath[1]);
+				permit(principal, "update", describe(row));
 				if (metadataChanging.has(row.threadId)) throw new Error("metadata_update_in_progress");
 				if (input.metadataVersion !== row.metadataVersion) throw new Error("metadata_conflict");
 				if ((input.title !== undefined && (typeof input.title !== "string" || input.title.length > 200)) ||
@@ -531,6 +539,7 @@ export function createManagedTower(dataDir, {
 			}
 			const createKey = uuid(input.idempotencyKey);
 			if (typeof input.runnerId !== "string" || (input.title !== undefined && typeof input.title !== "string") || (input.title?.length ?? 0) > 200) throw new Error("invalid_create");
+			permit(principal, "create", { runnerId: input.runnerId, cwd: input.cwd });
 			const runner = connections(input.runnerId).find((candidate) => candidate.createSupported);
 			if (!runner) throw new Error(connections(input.runnerId).length ? "create_needs_managed_threads_runner" : "runner_offline");
 			if (input.cwd !== undefined && !workspaces(input.runnerId).includes(input.cwd)) throw new Error("unknown_workspace");
@@ -553,12 +562,12 @@ export function createManagedTower(dataDir, {
 	}
 	return { http, isManagedSession: (name) => !!db.prepare("SELECT 1 FROM threads WHERE threadId=?").get(name),
 		// Active threads double as the runner's sessions on the home page.
-		presence: () => {
+		presence: (principal) => {
 			const machines = new Map(); // runner id -> earliest ready connection time
-			for (const runner of runners.values()) if (runner.ready && !(machines.get(runner.id) <= runner.connectedAt)) machines.set(runner.id, runner.connectedAt);
+			for (const runner of runners.values()) if (runner.ready && policy(principal, "read", { runnerId: runner.id }) && !(machines.get(runner.id) <= runner.connectedAt)) machines.set(runner.id, runner.connectedAt);
 			return [...machines].map(([id, connectedAt]) => ({ id, connectedAt,
-				sessions: db.prepare("SELECT threadId, runnerId, title, archivedAt FROM threads WHERE runnerId=? AND archivedAt IS NULL ORDER BY updatedAt DESC, threadId DESC").all(id)
-					.filter(isActive).map((row) => {
+				sessions: db.prepare("SELECT * FROM threads WHERE runnerId=? AND archivedAt IS NULL ORDER BY updatedAt DESC, threadId DESC").all(id)
+					.filter((row) => isActive(row) && policy(principal, "read", describe(row))).map((row) => {
 						const state = liveStates.get(row.threadId).state;
 						return { name: row.title || row.threadId, threadId: row.threadId, state: state === "starting" ? "opening" : state, managed: true };
 					}) }));

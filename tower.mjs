@@ -57,9 +57,9 @@ function parseArgs(argv) {
 	return opts;
 }
 
-export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions, subjectHeader }) {
+export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions, subjectHeader, policy = () => true }) {
 	subjectHeader = subjectHeader?.toLowerCase();
-	const managed = dataDir ? createManagedTower(dataDir, { ...managedOptions, onPresence: () => broadcastSnapshot() }) : null;
+	const managed = dataDir ? createManagedTower(dataDir, { ...managedOptions, policy, onPresence: () => broadcastSnapshot() }) : null;
 	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
 	// "id/name" -> { client, queue, timer } — client held while the runner opens the session
@@ -110,9 +110,9 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		[...runners.entries()].map(([id, r]) => ({ id, connectedAt: r.connectedAt, sessions: r.sessions.size }));
 	// Managed-only runners (interactive mode) never open the legacy control socket, so their presence
 	// and active threads are merged in here.
-	const snapshot = () => {
-		const managedRunners = new Map((managed?.presence() ?? []).map((runner) => [runner.id, runner]));
-		const list = [...runners.entries()].map(([id, runner]) => ({
+	const snapshot = (principal) => {
+		const managedRunners = new Map((managed?.presence(principal) ?? []).map((runner) => [runner.id, runner]));
+		const list = [...runners.entries()].filter(([id]) => policy(principal, "read", { runnerId: id })).map(([id, runner]) => ({
 			id,
 			connectedAt: runner.connectedAt,
 			managed: managedRunners.has(id),
@@ -132,19 +132,19 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		}
 		return { runners: list };
 	};
-	const uiStreams = new Set();
+	const uiStreams = new Map(); // response -> principal, each seeing its own view
 	const broadcastSnapshot = () => {
-		const event = `data: ${JSON.stringify(snapshot())}\n\n`;
-		for (const res of uiStreams) res.write(event);
+		for (const [res, principal] of uiStreams) res.write(`data: ${JSON.stringify(snapshot(principal))}\n\n`);
 	};
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
 		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/") || url.pathname.startsWith("/api/managed/"))) {
 			const runnerTransfer = url.pathname.startsWith("/api/managed/snapshots/");
-			if (!(runnerTransfer ? bearerAuthorized(req) : uiPrincipal(req))) { res.writeHead(401).end(); return; }
+			const principal = runnerTransfer ? null : uiPrincipal(req);
+			if (runnerTransfer ? !bearerAuthorized(req) : !principal) { res.writeHead(401).end(); return; }
 			if (req.method !== "GET" && !csrfAuthorized(req)) { res.writeHead(403).end(); return; }
-			void managed.http(req, res, url);
+			void managed.http(req, res, url, principal);
 			return;
 		}
 		if (req.method === "GET" && (url.pathname === "/threads" || url.pathname === "/threads/" || /^\/threads\/[0-9a-f-]{36}$/i.test(url.pathname))) {
@@ -218,18 +218,20 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/state") {
-			if (!uiPrincipal(req)) {
+			const principal = uiPrincipal(req);
+			if (!principal) {
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
 				res.writeHead(401).end();
 				return;
 			}
 			res.setHeader("content-type", "application/json");
 			res.setHeader("cache-control", "no-store");
-			res.end(JSON.stringify(snapshot()));
+			res.end(JSON.stringify(snapshot(principal)));
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/events") {
-			if (!uiPrincipal(req)) {
+			const principal = uiPrincipal(req);
+			if (!principal) {
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
 				res.writeHead(401).end();
 				return;
@@ -239,8 +241,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 				"cache-control": "no-cache, no-transform",
 				connection: "keep-alive",
 			});
-			uiStreams.add(res);
-			res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+			uiStreams.set(res, principal);
+			res.write(`data: ${JSON.stringify(snapshot(principal))}\n\n`);
 			req.on("close", () => uiStreams.delete(res));
 			return;
 		}
@@ -293,7 +295,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			ws.isAlive = false;
 			ws.ping();
 		}
-		for (const res of uiStreams) res.write(": heartbeat\n\n");
+		for (const res of uiStreams.keys()) res.write(": heartbeat\n\n");
 	}, 30000);
 	server.on("close", () => { clearInterval(heartbeat); managed?.close(); });
 

@@ -11,6 +11,9 @@ import { createTower } from "../tower.mjs";
 import { commandPayload, payloadHash } from "../managed-journal.mjs";
 
 const token = "fake-collaboration-protocol";
+const bob = "bob@example.com";
+// bob and every thread on runner-c are kept away from runner-b; everyone else keeps full access.
+const policy = (who, action, resource) => !(resource.runnerId === "runner-b" && ((who.kind === "user" && who.subject === bob) || (who.kind === "thread" && who.runnerId === "runner-c")));
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 async function until(fn, label, timeout = 5000) {
 	const end = Date.now() + timeout;
@@ -23,7 +26,7 @@ let directory = resolve(temp, "tower");
 mkdirSync(directory);
 let server, port;
 async function start() {
-	server = createTower({ token, dataDir: directory, idleTtlMs: 0, managedOptions: { minFreeBytes: 1 }, subjectHeader: "X-Forwarded-User" });
+	server = createTower({ token, dataDir: directory, idleTtlMs: 0, managedOptions: { minFreeBytes: 1 }, subjectHeader: "X-Forwarded-User", policy });
 	server.listen(port ?? 0, "127.0.0.1");
 	await once(server, "listening");
 	port = server.address().port;
@@ -144,6 +147,26 @@ try {
 	anonymous.ws.close();
 	const overlong = new WebSocket(`ws://127.0.0.1:${port}/api/threads/${c.threadId}/stream`, { headers: { authorization: `Bearer ${token}`, "x-forwarded-user": "x".repeat(201) } });
 	assert.equal((await once(overlong, "close"))[0], 4001, "an unusable subject fails closed");
+
+	const as = (subject) => ({ headers: { authorization: `Bearer ${token}`, "x-forwarded-user": subject } });
+	const json = async (path, subject) => { const response = await fetch(`http://127.0.0.1:${port}${path}`, as(subject)); return { status: response.status, body: await response.json() }; };
+	assert.equal((await json(`/api/threads/${b.threadId}`, "alice@example.com")).status, 200);
+	assert.equal((await json(`/api/threads/${b.threadId}`, bob)).status, 403, "policy hides runner-b's thread from bob");
+	assert.equal((await json(`/api/threads/${b.threadId}/history`, bob)).status, 403);
+	assert.equal((await json(`/api/threads/${b.threadId}/commands/${b.prompts[0].commandId}`, bob)).status, 403);
+	assert.ok(!(await json("/api/threads", bob)).body.threads.some((t) => t.runnerId === "runner-b"), "listing omits what bob may not read");
+	assert.ok((await json("/api/threads", "alice@example.com")).body.threads.some((t) => t.runnerId === "runner-b"));
+	assert.ok(!(await json("/api/managed/runners", bob)).body.some((r) => r.id === "runner-b"));
+	assert.ok(!(await json("/api/state", bob)).body.runners.some((r) => r.id === "runner-b"), "home page omits runner-b for bob");
+	assert.ok((await json("/api/state", "alice@example.com")).body.runners.some((r) => r.id === "runner-b"));
+	assert.equal((await fetch(`http://127.0.0.1:${port}/api/threads/${b.threadId}`, { method: "PATCH", ...as(bob), body: JSON.stringify({ title: "x", metadataVersion: 1 }) })).status, 403);
+	const bobStream = new WebSocket(`ws://127.0.0.1:${port}/api/threads/${b.threadId}/stream`, as(bob));
+	assert.equal((await once(bobStream, "close"))[0], 1008, "bob cannot open runner-b's stream");
+	const bobOnC = await browser(c.threadId, { "x-forwarded-user": bob });
+	assert.deepEqual((await bobOnC.request("prompt", { commandId: randomUUID(), message: "bob on c" })).actor, { kind: "user", subject: bob }, "policy leaves bob's other threads untouched");
+	bobOnC.ws.close();
+	assert.ok(!(await c.call("thread_list")).threads.some((t) => t.threadId === b.threadId), "thread policy hides runner-b from runner-c's threads");
+	assert.equal((await c.call("thread_delegate", { targetThreadId: b.threadId, requestId: randomUUID(), prompt: "forbidden" })).error, "forbidden");
 
 	const premature = await b.call("thread_report", { taskId: randomUUID(), outcome: "completed", summary: "no" });
 	assert.equal(premature.error, "unknown_collaboration_task");
