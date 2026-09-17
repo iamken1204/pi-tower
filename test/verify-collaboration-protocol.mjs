@@ -12,8 +12,9 @@ import { commandPayload, payloadHash } from "../managed-journal.mjs";
 
 const token = "fake-collaboration-protocol";
 const bob = "bob@example.com";
-// bob and every thread on runner-c are kept away from runner-b; everyone else keeps full access.
-const policy = (who, action, resource) => !(resource.runnerId === "runner-b" && ((who.kind === "user" && who.subject === bob) || (who.kind === "thread" && who.runnerId === "runner-c")));
+// bob and every thread on runner-c are kept away from runner-b, and runner-c's threads may not rename themselves; everyone else keeps full access.
+const policy = (who, action, resource) => !(resource.runnerId === "runner-b" && ((who.kind === "user" && who.subject === bob) || (who.kind === "thread" && who.runnerId === "runner-c")))
+	&& !(who.kind === "thread" && who.runnerId === "runner-c" && action === "update");
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 async function until(fn, label, timeout = 5000) {
 	const end = Date.now() + timeout;
@@ -167,6 +168,22 @@ try {
 	bobOnC.ws.close();
 	assert.ok(!(await c.call("thread_list")).threads.some((t) => t.threadId === b.threadId), "thread policy hides runner-b from runner-c's threads");
 	assert.equal((await c.call("thread_delegate", { targetThreadId: b.threadId, requestId: randomUUID(), prompt: "forbidden" })).error, "forbidden");
+	assert.equal((await c.call("thread_metadata", { title: "renamed by c", metadataVersion: (await c.call("thread_metadata")).metadataVersion })).error, "forbidden", "a thread's own rename passes the policy");
+	assert.equal((await c.call("thread_metadata")).title, c.title);
+	const walk = async (subject) => {
+		const seen = []; let cursor = null;
+		do {
+			const page = (await json(`/api/threads?limit=1${cursor ? `&cursor=${cursor}` : ""}`, subject)).body;
+			seen.push(...page.threads.map((t) => t.threadId));
+			if (page.nextCursor && subject === bob) assert.notEqual(JSON.parse(Buffer.from(page.nextCursor, "base64url").toString()).threadId, b.threadId, "a cursor never names a hidden thread");
+			cursor = page.nextCursor;
+		} while (cursor);
+		return seen;
+	};
+	assert.deepEqual(await walk(bob), [...await walk(bob)], "paging is stable");
+	assert.deepEqual(new Set(await walk(bob)), new Set([a.threadId, c.threadId]), "bob pages through everything he may read");
+	assert.equal((await walk(bob)).length, 2, "and each thread once");
+	assert.equal((await walk("alice@example.com")).length, 3);
 
 	const premature = await b.call("thread_report", { taskId: randomUUID(), outcome: "completed", summary: "no" });
 	assert.equal(premature.error, "unknown_collaboration_task");

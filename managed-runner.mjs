@@ -299,8 +299,9 @@ export class ManagedRunner {
 			}
 			durableWrite(entry.recordFile, entry.record);
 		} catch (error) {
-			if (error.message === "metadata_conflict") {
-				entry.record.metadataConflict = "Name changed locally and in Tower. Rename again after reviewing both names.";
+			if (["metadata_conflict", "forbidden"].includes(error.message)) {
+				entry.record.metadataConflict = error.message === "forbidden" ? "Tower policy does not allow renaming this thread; the new name stays local."
+					: "Name changed locally and in Tower. Rename again after reviewing both names.";
 				durableWrite(entry.recordFile, entry.record);
 				entry.native?.ui.notify(entry.record.metadataConflict, "warning");
 			}

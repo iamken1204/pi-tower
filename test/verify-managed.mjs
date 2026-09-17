@@ -35,7 +35,8 @@ async function until(fn, description, ms = 15000) {
 	throw new Error(`timeout: ${description}`);
 }
 async function tower() {
-	server = createTower({ token, dataDir: towerDirectory, idleTtlMs: 0 });
+	// eve may create threads but never read one; the policy must hold on replayed creates too.
+	server = createTower({ token, dataDir: towerDirectory, idleTtlMs: 0, subjectHeader: "x-forwarded-user", policy: (who, action) => !(who.subject === "eve" && action === "read") });
 	server.listen(port ?? 0, "127.0.0.1"); await once(server, "listening"); port = server.address().port;
 }
 function runner(cwd = "workspace", data = "data", boundary) {
@@ -170,6 +171,9 @@ try {
 	await stop(r);
 	r = runner("other"); // Existing thread must retain workspace, not follow new runner cwd.
 	await until(async () => (await create(key)).status === 201, "restart registration");
+	const replay = await fetch(`http://127.0.0.1:${port}/api/threads`, { method: "POST", headers: { authorization: `Bearer ${token}`, "x-forwarded-user": "eve" },
+		body: JSON.stringify({ idempotencyKey: key, runnerId: "managed-test", title: "測試" }) });
+	assert.equal(replay.status, 403, "a replayed create never hands back a thread the caller may not read");
 	client = await attach(id);
 	assert.equal((await client.request("state")).piSessionId, created.piSessionId);
 	const firstCommand = randomUUID();

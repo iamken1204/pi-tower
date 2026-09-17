@@ -132,6 +132,7 @@ export function createManagedTower(dataDir, {
 			if (input.title !== undefined) {
 				if (typeof input.title !== "string" || input.title.length > 200) throw new Error("invalid_metadata");
 				if (source.title !== input.title) {
+					permit(who, "update", describe(source));
 					if (input.metadataVersion !== source.metadataVersion) throw new Error("metadata_conflict");
 					db.prepare("UPDATE threads SET title=?,metadataVersion=metadataVersion+1 WHERE threadId=?").run(input.title, source.threadId);
 					source = thread(source.threadId);
@@ -473,19 +474,23 @@ export function createManagedTower(dataDir, {
 				const limit = Number(url.searchParams.get("limit") ?? 50);
 				if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_page_limit");
 				const cursor = url.searchParams.has("cursor") ? JSON.parse(Buffer.from(url.searchParams.get("cursor"), "base64url").toString()) : null;
-				if (cursor && (typeof cursor.updatedAt !== "string" || !uuid(cursor.threadId))) throw new Error("invalid_cursor");
+				if (cursor && ((cursor.updatedAt !== undefined && (typeof cursor.updatedAt !== "string" || !uuid(cursor.threadId))) ||
+					(cursor.skip !== undefined && !(Number.isSafeInteger(cursor.skip) && cursor.skip >= 0)))) throw new Error("invalid_cursor");
 				const awakeThreads = [...liveStates.entries()].filter(([threadId, runtime]) => AWAKE.has(runtime.state) && host({ threadId })).map(([threadId]) => threadId);
 				const rows = db.prepare(`SELECT threadId FROM threads WHERE (archivedAt IS NOT NULL)=? AND (?='' OR runnerId=?)
 					AND instr(lower(title),lower(?))>0 AND (? IS NULL OR updatedAt<? OR (updatedAt=? AND threadId<?))
 					AND (?=0 OR (archivedAt IS NULL AND threadId IN (SELECT value FROM json_each(?))))
-					ORDER BY updatedAt DESC,threadId DESC LIMIT ?`).all(url.searchParams.get("archived") === "true" ? 1 : 0,
+					ORDER BY updatedAt DESC,threadId DESC LIMIT ? OFFSET ?`).all(url.searchParams.get("archived") === "true" ? 1 : 0,
 					url.searchParams.get("runner") ?? "", url.searchParams.get("runner") ?? "", url.searchParams.get("q") ?? "",
 					cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.updatedAt ?? null, cursor?.threadId ?? null,
-					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(awakeThreads), limit + 1);
+					url.searchParams.get("active") === "true" ? 1 : 0, JSON.stringify(awakeThreads), limit + 1, cursor?.skip ?? 0);
 				const slice = rows.slice(0, limit).map(({ threadId }) => describe(thread(threadId)));
-				const last = slice.at(-1); // The cursor continues from the last row fetched, hidden or not.
 				const page = slice.filter((row) => policy(principal, "read", row));
-				res.end(JSON.stringify({ threads: page, nextCursor: rows.length > limit ? Buffer.from(JSON.stringify({ updatedAt: last.updatedAt, threadId: last.threadId })).toString("base64url") : null }));
+				// A cursor names only a row the caller may see; hidden rows after it are skipped by count, so they neither leak nor stall paging.
+				const anchor = page.at(-1);
+				const next = anchor ? { updatedAt: anchor.updatedAt, threadId: anchor.threadId, skip: slice.length - 1 - slice.indexOf(anchor) }
+					: { updatedAt: cursor?.updatedAt, threadId: cursor?.threadId, skip: (cursor?.skip ?? 0) + slice.length };
+				res.end(JSON.stringify({ threads: page, nextCursor: rows.length > limit ? Buffer.from(JSON.stringify(next)).toString("base64url") : null }));
 				return;
 			}
 			if (req.method === "GET" && url.pathname.startsWith("/api/threads/")) {
@@ -545,6 +550,7 @@ export function createManagedTower(dataDir, {
 			if (input.cwd !== undefined && !workspaces(input.runnerId).includes(input.cwd)) throw new Error("unknown_workspace");
 			let row = db.prepare("SELECT * FROM threads WHERE createKey=?").get(createKey);
 			if (row && (row.runnerId !== input.runnerId || row.createTitle !== (input.title ?? ""))) throw new Error("create_key_conflict");
+			if (row) permit(principal, "read", describe(row)); // A replay answers with the thread that exists, wherever it lives.
 			if (!row) {
 				const threadId = randomUUID();
 				const now = new Date().toISOString();
