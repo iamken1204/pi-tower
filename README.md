@@ -148,6 +148,8 @@ Detaching a client leaves its session pipe idle on the tower, so a later attach 
 
 Single shared token, sent as an Authorization header on every upgrade and HTTP request, so it stays out of URLs and access logs. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
 
+The legacy relay (`/runner`, `/runner-session`, `/attach`, `pi-task` and the `runner_task` tool) is a pure pipe: Tower forwards frames without reading them, records nothing, and consults no policy beyond the token. The only trace of a relayed task is the transcript a runner keeps when started without `--no-session`. Deployments that need per-person permissions or an audit trail use Cloud Threads, where every command carries an actor and passes the policy; the legacy relay is outside that contract.
+
 ## Verify
 
 ```sh
