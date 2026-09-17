@@ -62,6 +62,8 @@ In the Zero Trust dashboard, point the tunnel's public hostname at `http://tower
 
 Open `https://<that-hostname>/` and enter the shared token to view live runner and session state. The tower exchanges it for a signed, HTTP-only session cookie valid for 30 days; the raw token is not retained by the page.
 
+The token admits a request but does not say who sent it. When Tower is reachable only through a proxy that authenticates people and sets or overwrites an identity header, such as Cloudflare Access (`cf-access-authenticated-user-email`) or oauth2-proxy (`x-forwarded-user`), pass that header name as `--subject-header` / `PI_TOWER_SUBJECT_HEADER`. Tower then records the value on every command receipt as `actor.subject`; a request carrying an empty or over-long value is rejected. Do not set it while Tower is reachable directly, since any token holder could then choose the name. Without it, receipts record `{ kind: "user" }`.
+
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh

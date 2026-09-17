@@ -20,14 +20,16 @@ function parseArgs(argv) {
 		tokenFile: process.env.PI_TOWER_TOKEN ? undefined : process.env.PI_TOWER_TOKEN_FILE,
 		idleTtl: process.env.PI_TOWER_IDLE_TTL ?? "30m",
 		dataDir: process.env.PI_TOWER_DATA_DIR,
+		subjectHeader: process.env.PI_TOWER_SUBJECT_HEADER,
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
-			console.log("pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]\n--data-dir <path> enables Cloud Threads at /threads (or PI_TOWER_DATA_DIR).\nManaged limits (environment, bytes):\nPI_MANAGED_TEXT_BYTES=262144 (set on runner too)\nPI_TOWER_MANAGED_FRAME_BYTES=524288\nPI_TOWER_MAX_SNAPSHOT_BYTES=67108864\nPI_TOWER_MAX_SNAPSHOT_TOTAL_BYTES=1073741824\nPI_TOWER_MIN_FREE_BYTES=268435456\nPI_TOWER_VIEWER_BUFFER_BYTES=1048576\nPI_TOWER_MAX_UPLOADS=2 (concurrent uploads)\nGET /api/managed/usage reports BLOB/database/WAL/free bytes.");
+			console.log("pi-tower [--port 9000] [--token t | --token-file path] [--idle-ttl 30m]\n--data-dir <path> enables Cloud Threads at /threads (or PI_TOWER_DATA_DIR).\n--subject-header <name> (or PI_TOWER_SUBJECT_HEADER) records the person an authenticating proxy names in that header, e.g. cf-access-authenticated-user-email.\nManaged limits (environment, bytes):\nPI_MANAGED_TEXT_BYTES=262144 (set on runner too)\nPI_TOWER_MANAGED_FRAME_BYTES=524288\nPI_TOWER_MAX_SNAPSHOT_BYTES=67108864\nPI_TOWER_MAX_SNAPSHOT_TOTAL_BYTES=1073741824\nPI_TOWER_MIN_FREE_BYTES=268435456\nPI_TOWER_VIEWER_BUFFER_BYTES=1048576\nPI_TOWER_MAX_UPLOADS=2 (concurrent uploads)\nGET /api/managed/usage reports BLOB/database/WAL/free bytes.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--port") opts.port = Number(argv[++i]);
 		else if (argv[i] === "--data-dir") opts.dataDir = argv[++i];
+		else if (argv[i] === "--subject-header") opts.subjectHeader = argv[++i];
 		else if (argv[i] === "--token") {
 			opts.token = argv[++i];
 			opts.tokenFile = undefined;
@@ -55,7 +57,8 @@ function parseArgs(argv) {
 	return opts;
 }
 
-export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions }) {
+export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_000, dataDir, managedOptions, subjectHeader }) {
+	subjectHeader = subjectHeader?.toLowerCase();
 	const managed = dataDir ? createManagedTower(dataDir, { ...managedOptions, onPresence: () => broadcastSnapshot() }) : null;
 	// id -> { ws (control socket), connectedAt, sessions: Map<name, { ws (data pipe), client, idle }> }
 	const runners = new Map();
@@ -84,7 +87,14 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		const supplied = Buffer.from(signature);
 		return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 	};
-	const uiAuthorized = (req) => bearerAuthorized(req) || uiSessionAuthorized(req);
+	// The token admits a request; a proxy that authenticates people (Cloudflare Access, oauth2-proxy) names the person in one header.
+	const identify = (req) => {
+		const subject = subjectHeader ? req.headers[subjectHeader] : undefined;
+		if (subject === undefined) return { kind: "user" };
+		if (typeof subject !== "string" || !subject || subject.length > 200) return null;
+		return { kind: "user", subject };
+	};
+	const uiPrincipal = (req) => (bearerAuthorized(req) || uiSessionAuthorized(req) ? identify(req) : null);
 	const secureRequest = (req) =>
 		req.socket.encrypted === true || req.headers["x-forwarded-proto"]?.split(",", 1)[0].trim() === "https";
 	const sameOrigin = (req) => req.headers.origin === `${secureRequest(req) ? "https" : "http"}://${req.headers.host}`;
@@ -132,7 +142,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		const url = new URL(req.url, "http://x");
 		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/") || url.pathname.startsWith("/api/managed/"))) {
 			const runnerTransfer = url.pathname.startsWith("/api/managed/snapshots/");
-			if (!(runnerTransfer ? bearerAuthorized(req) : uiAuthorized(req))) { res.writeHead(401).end(); return; }
+			if (!(runnerTransfer ? bearerAuthorized(req) : uiPrincipal(req))) { res.writeHead(401).end(); return; }
 			if (req.method !== "GET" && !csrfAuthorized(req)) { res.writeHead(403).end(); return; }
 			void managed.http(req, res, url);
 			return;
@@ -143,7 +153,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			res.end(readFileSync(new URL("./threads.html", import.meta.url))); return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/logout") {
-			if (!uiAuthorized(req)) { res.writeHead(401).end(); return; }
+			if (!uiPrincipal(req)) { res.writeHead(401).end(); return; }
 			if (!csrfAuthorized(req)) { res.writeHead(403).end(); return; }
 			setUiSessionCookie(req, res, "", 0);
 			res.writeHead(204).end(); return;
@@ -193,7 +203,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		if (req.method === "DELETE" && url.pathname === "/api/session") {
-			if (!uiAuthorized(req)) {
+			if (!uiPrincipal(req)) {
 				res.writeHead(401).end();
 				return;
 			}
@@ -208,7 +218,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/state") {
-			if (!uiAuthorized(req)) {
+			if (!uiPrincipal(req)) {
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
 				res.writeHead(401).end();
 				return;
@@ -219,7 +229,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/events") {
-			if (!uiAuthorized(req)) {
+			if (!uiPrincipal(req)) {
 				if (uiSessionCookie(req)) setUiSessionCookie(req, res, "", 0);
 				res.writeHead(401).end();
 				return;
@@ -256,16 +266,19 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			socket.destroy();
 			return;
 		}
-		const handler = managedStream || url.pathname === "/managed/client" ? browserWss : wss;
+		const humanRoute = managedStream || url.pathname === "/managed/client";
+		const handler = humanRoute ? browserWss : wss;
 		handler.handleUpgrade(req, socket, head, (ws) => {
 			ws.on("error", () => {}); // Protocol/frame errors close the peer, not the Tower process.
-			if (!(managedStream ? bearerAuthorized(req) || (uiSessionAuthorized(req) && sameOrigin(req)) : bearerAuthorized(req))) {
+			const admitted = bearerAuthorized(req) || (managedStream && uiSessionAuthorized(req) && sameOrigin(req));
+			const principal = admitted && humanRoute ? identify(req) : null;
+			if (humanRoute ? !principal : !admitted) {
 				ws.close(4001, "bad token");
 				return;
 			}
 			ws.isAlive = true;
 			ws.on("pong", () => (ws.isAlive = true));
-			route(ws, url.searchParams);
+			route(ws, url.searchParams, principal);
 		});
 	});
 
@@ -455,8 +468,8 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-	const { port, token, idleTtlMs, dataDir } = parseArgs(process.argv.slice(2));
-	const server = createTower({ token, idleTtlMs, dataDir }).listen(port, () => console.log(`pi-tower listening on :${port}`));
+	const { port, token, idleTtlMs, dataDir, subjectHeader } = parseArgs(process.argv.slice(2));
+	const server = createTower({ token, idleTtlMs, dataDir, subjectHeader }).listen(port, () => console.log(`pi-tower listening on :${port}`));
 	// As container PID 1, node has no default signal dispositions, so docker stop would otherwise hang 10s to SIGKILL.
 	for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, async () => { await server.shutdown(); process.exit(0); });
 }

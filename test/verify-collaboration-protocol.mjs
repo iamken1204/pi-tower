@@ -23,7 +23,7 @@ let directory = resolve(temp, "tower");
 mkdirSync(directory);
 let server, port;
 async function start() {
-	server = createTower({ token, dataDir: directory, idleTtlMs: 0, managedOptions: { minFreeBytes: 1 } });
+	server = createTower({ token, dataDir: directory, idleTtlMs: 0, managedOptions: { minFreeBytes: 1 }, subjectHeader: "X-Forwarded-User" });
 	server.listen(port ?? 0, "127.0.0.1");
 	await once(server, "listening");
 	port = server.address().port;
@@ -75,7 +75,7 @@ class FakeRunner {
 		if (frame.operation === "prompt") {
 			this.prompts.push(frame);
 			const payload = commandPayload(frame);
-			this.send({ type: "collaboration_event", connectionId: this.connectionId, threadId: this.threadId, taskId: frame.task.taskId, status: "running" });
+			if (frame.task) this.send({ type: "collaboration_event", connectionId: this.connectionId, threadId: this.threadId, taskId: frame.task.taskId, status: "running" });
 			return this.reply(frame, { commandId: frame.commandId, payload, payloadHash: payloadHash(payload), epoch: frame.epoch, bootId: this.bootId, status: "accepted" });
 		}
 		this.reply(frame, {});
@@ -89,6 +89,19 @@ class FakeRunner {
 	}
 	state(fields) { this.send({ type: "runtime_state", threadId: this.threadId, ...this.#inventory(), ...fields }); }
 	close() { this.ws.close(); }
+}
+// A browser (or bearer API client) on a thread's stream; resolves once Tower granted input access.
+async function browser(threadId, headers = {}) {
+	const ws = new WebSocket(`ws://127.0.0.1:${port}/api/threads/${threadId}/stream`, { headers: { authorization: `Bearer ${token}`, ...headers } });
+	const frames = [];
+	ws.on("message", (bytes) => frames.push(JSON.parse(bytes.toString())));
+	await once(ws, "open");
+	const access = await until(() => frames.find((f) => f.type === "access_changed" && f.epoch), "browser access");
+	return { ws, async request(operation, fields = {}) {
+		const requestId = randomUUID();
+		ws.send(JSON.stringify({ version: 1, requestId, operation, epoch: access.epoch, ...fields }));
+		return (await until(() => frames.find((f) => f.type === "result" && f.requestId === requestId), operation)).result;
+	} };
 }
 
 try {
@@ -123,6 +136,14 @@ try {
 	const forged = { commandId: randomUUID(), payload: commandPayload({ operation: "prompt", message: "forged" }), epoch: {}, bootId: b.bootId, status: "accepted", actor: { kind: "user", subject: "forged" } };
 	b.send({ type: "command_status", threadId: b.threadId, receipt: { ...forged, payloadHash: payloadHash(forged.payload) } });
 	assert.equal((await until(() => receiptOf(b.threadId, forged.commandId), "runner-originated receipt")).actor, null, "a runner cannot name the actor of a command Tower never admitted");
+	const named = await browser(c.threadId, { "x-forwarded-user": "alice@example.com" });
+	assert.deepEqual((await named.request("prompt", { commandId: randomUUID(), message: "as alice" })).actor, { kind: "user", subject: "alice@example.com" }, "the proxy-named person reaches the receipt");
+	named.ws.close();
+	const anonymous = await browser(c.threadId);
+	assert.deepEqual((await anonymous.request("prompt", { commandId: randomUUID(), message: "unnamed" })).actor, { kind: "user" }, "a token holder without a subject header stays an unnamed user");
+	anonymous.ws.close();
+	const overlong = new WebSocket(`ws://127.0.0.1:${port}/api/threads/${c.threadId}/stream`, { headers: { authorization: `Bearer ${token}`, "x-forwarded-user": "x".repeat(201) } });
+	assert.equal((await once(overlong, "close"))[0], 4001, "an unusable subject fails closed");
 
 	const premature = await b.call("thread_report", { taskId: randomUUID(), outcome: "completed", summary: "no" });
 	assert.equal(premature.error, "unknown_collaboration_task");

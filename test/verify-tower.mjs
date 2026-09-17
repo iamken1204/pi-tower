@@ -226,5 +226,18 @@ fake3.close();
 console.log("ok DELETE /api/session closes session");
 
 server.close();
+
+const named = createTower({ token: TOKEN, subjectHeader: "X-Forwarded-User" });
+named.listen(0);
+await once(named, "listening");
+const namedPort = named.address().port;
+const state = (headers) => fetch(`http://127.0.0.1:${namedPort}/api/state`, { headers: { authorization: `Bearer ${TOKEN}`, ...headers } });
+assert.equal((await state({})).status, 200);
+assert.equal((await state({ "x-forwarded-user": "alice@example.com" })).status, 200);
+assert.equal((await state({ "x-forwarded-user": "" })).status, 401);
+assert.equal((await state({ "x-forwarded-user": "x".repeat(201) })).status, 401);
+named.close();
+console.log("ok subject header names a token holder; unusable values fail closed");
+
 console.log("verify-tower: all green");
 process.exit(0);

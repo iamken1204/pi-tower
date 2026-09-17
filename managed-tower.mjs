@@ -373,7 +373,7 @@ export function createManagedTower(dataDir, {
 			broadcast(threadId, { type: "resync_required", threadId, runner: "offline" });
 		}
 	}
-	function handleClient(ws, params) {
+	function handleClient(ws, params, principal) {
 		let row;
 		try { row = thread(params.get("thread")); } catch (error) { ws.close(1008, error.message); return; }
 		if (!clients.has(row.threadId)) clients.set(row.threadId, new Set());
@@ -391,7 +391,7 @@ export function createManagedTower(dataDir, {
 				if (["prompt", "abort", "extension_ui_response", "sleep"].includes(message.operation)) requireAccess(row, message.epoch);
 				const result = message.operation === "subscribe" ? { thread: describe(row), runtime: liveStates.get(row.threadId), online: !!host(row) }
 					: ["prompt", "abort", "extension_ui_response"].includes(message.operation)
-					? await execute(row, message, { kind: "user" })
+					? await execute(row, message, principal)
 					: message.operation === "command" ? command(row.threadId, message.commandId)
 					: await request(row, message.operation, message.operation === "sleep" ? { epoch: message.epoch } : {});
 				send(ws, { type: "result", requestId: message.requestId, result });
