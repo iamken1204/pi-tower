@@ -482,7 +482,7 @@ Log 記錄 thread ID、command ID、run ID、runner instance/boot ID、revision 
 
 測試優先使用 fake pi/runner 注入時序及 crash，不依賴真實 LLM 費用。另用真實支援版本的 `pi --mode rpc` 驗證 session ID、持久化、RPC schema 與還原。既有 `test/verify-chain.mjs` 的 no-LLM 測試可以延伸，但不足以單獨證明對話續接。
 
-新增測試納入 `npm run verify`，或由 `verify` 呼叫明確的 managed-thread 測試腳本。單元測試綠燈不能取代跨程序及瀏覽器測試。
+新增測試納入 `bun run verify`，或由 `verify` 呼叫明確的 managed-thread 測試腳本。單元測試綠燈不能取代跨程序及瀏覽器測試。
 
 ### 人工 smoke test
 

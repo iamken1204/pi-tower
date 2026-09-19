@@ -1,6 +1,6 @@
 # Cloud Threads v1 第 0 階段相容性紀錄
 
-狀態：2026-09-14 的歷史紀錄，現況見[實作與驗證紀錄](progress.md)。之後的變化：`better-sqlite3@13.0.3` 已是產品依賴；複合 revision 與連線 epoch 已實作；完整產品 image 已由 `test/verify-docker.mjs` 驗證；同主機的 writer 排除改用作業系統持有的 SQLite 鎖，沒有採用 supervisor。
+狀態：2026-09-14 的歷史紀錄，現況見[實作與驗證紀錄](progress.md)。之後的變化：`better-sqlite3@13.0.3` 已是產品依賴；複合 revision 與連線 epoch 已實作；完整產品 image 已由 `test/verify-docker.mjs` 驗證；同主機的 writer 排除改用作業系統持有的 SQLite 鎖，沒有採用 supervisor；2026-09-19 起 Tower 與 runner 改由 Bun 1.4.2 執行，`better-sqlite3` 由內建的 `bun:sqlite` 取代，下文的 Node 與 `npm` 指令是當時的做法。
 
 第 0 階段相容性調查完成，可依下列契約進入第 1 階段；本輪停在交付，不開始實作 managed runtime。pi 的公開介面已能保存完整樹並精確還原 leaf，SQLite 已通過 Alpine 安裝與跨程序持久化測試。跨主機複製 runner 目錄後繼續使用已確定不支援。同主機的 writer 排他保護仍是後續開放寫入的必要條件，不是現有功能。
 

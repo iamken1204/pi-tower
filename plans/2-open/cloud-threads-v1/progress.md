@@ -10,9 +10,9 @@
 
 `/reload` 重新安裝 UI bridge，`/new` 註冊新 thread 並停用舊 thread 的網頁輸入。Tower 僅在本次 inventory 確認包含該 thread 時，讓 runner 清除首次註冊意圖。已註冊 thread 若不在較舊 Tower 備份中，仍保留本機資料並停止同步，不重建可能遺失的標題／封存狀態。
 
-`node test/compat/verify-interactive.mjs` 使用獨立 tmux server、隔離 HOME／pi profile／workspace 與 faux provider，在真實 pi 0.85.1、Node 26.8.2 通過：終端先輸入、公開 SDK 遠端輸入顯示在同一原生 TUI、執行中遠端 follow-up 確實進入佇列、遠端回答 confirm 後本機 dialog 關閉且可繼續輸入，以及遠端 transport 關閉後本機仍收到新回答。沒有付費 LLM 呼叫或私有 API。
+`bun run test/compat/verify-interactive.mjs` 使用獨立 tmux server、隔離 HOME／pi profile／workspace 與 faux provider，在真實 pi 0.85.1、Node 26.8.2 通過：終端先輸入、公開 SDK 遠端輸入顯示在同一原生 TUI、執行中遠端 follow-up 確實進入佇列、遠端回答 confirm 後本機 dialog 關閉且可繼續輸入，以及遠端 transport 關閉後本機仍收到新回答。沒有付費 LLM 呼叫或私有 API。
 
-上述 probe 另保留作為 SDK 相容性證據。產品測試為 `npm run verify:native`，已在 Node 22.22.0／26.8.2、真實 pi 0.85.1 通過：本機與兩個 WebSocket client 共用 session、preflight 期間排隊、steering、停止清除佇列、三種跨端 dialog、拒絕第二次回答、editor 拒絕遠端回答、Tower 離線期間本機繼續、舊 epoch 失效、`/reload`、`/new`，以及 SIGKILL 後從不同啟動目錄還原同一 entries／leaf，再於原 cwd 續接。測試使用隔離 HOME／profile／workspace 與 faux provider，不讀取真實憑證或呼叫付費模型。
+上述 probe 另保留作為 SDK 相容性證據。產品測試為 `bun run verify:native`，已在 Node 22.22.0／26.8.2、真實 pi 0.85.1 通過：本機與兩個 WebSocket client 共用 session、preflight 期間排隊、steering、停止清除佇列、三種跨端 dialog、拒絕第二次回答、editor 拒絕遠端回答、Tower 離線期間本機繼續、舊 epoch 失效、`/reload`、`/new`，以及 SIGKILL 後從不同啟動目錄還原同一 entries／leaf，再於原 cwd 續接。測試使用隔離 HOME／profile／workspace 與 faux provider，不讀取真實憑證或呼叫付費模型。
 
 `--managed-threads` 的背景 RPC 路徑保留，沒有原生 TUI，忙碌時不收新 prompt；網頁依 runtime capability 停用送出。這條相容路徑不提供本機互動體驗；要在本機互動就用 `pi-runner` 的預設模式，`--interactive` 仍可明確指定。
 
@@ -20,7 +20,7 @@ Native 測試也驗證未啟動模型回合的 custom entry 會同步，以及�
 
 ## 持久化與還原契約
 
-Managed mode 明確啟用，legacy relay 保留原有使用方式。實測 pi 0.85.1、Node 22.22.0／26.8.2、better-sqlite3 13.0.3；只測過這個 pi 版本，不把它稱為最低支援版本。Tower 使用單一 SQLite，schema version 5、WAL、FULL、1250 ms busy timeout。沒有 S3。
+Managed mode 明確啟用，legacy relay 保留原有使用方式。實測 pi 0.85.1、Bun 1.4.2 與其內建的 `bun:sqlite`（2026-09-19 前為 Node 22.22.0／26.8.2 與 better-sqlite3 13.0.3，見[改用 Bun](#2026-09-19-改用-bun)）；只測過這個 pi 版本，不把它稱為最低支援版本。Tower 使用單一 SQLite，schema version 5、WAL、FULL、1250 ms busy timeout。沒有 S3。
 
 Runner 用公開 SDK 開啟 session，再套用 `branch(leafId)` 或 `resetLeaf()`，驗證 session ID、完整 entries 與原 cwd 後接上公開 `runRpcMode`。沒有修改 pi 核心或使用私有 API。Header-only JSONL 讓空白 thread 也有持久身分；整份 registry／JSONL／checkpoint 先寫進暫存目錄，再以 rename 一起發布。建立時 crash 留下的 `.prepare-*` 不會成為 runtime，也不阻止已發布的 thread 重啟。
 
@@ -40,9 +40,9 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 ## 可重現測試與證據
 
-執行 `npm run verify:phase0`，它會在隔離 HOME、pi profile 與 workspace 執行完整 `verify`，不使用真實使用者憑證。`PI_COMPAT_PACKAGE` 可指定已安裝的 pi 套件。測試不同 Node 時，需在隔離 checkout 用該 Node 執行 `npm ci`，避免沿用另一個 Node ABI 的 native module。
+執行 `bun run verify:phase0`，它會在隔離 HOME、pi profile 與 workspace 執行完整 `verify`，不使用真實使用者憑證。`PI_COMPAT_PACKAGE` 可指定已安裝的 pi 套件。改用 Bun 後沒有 native module，不必再為不同執行環境各自安裝依賴。
 
-最終原始碼已在 Node 22.22.0 與 26.8.2 各跑過完整隔離套件，全部通過；`npm pack --dry-run` 與 `git diff --check` 也通過。Node 22 使用獨立安裝的 native dependencies，沒有共用 Node 26 的 ABI。
+改用 Bun 之前，最終原始碼已在 Node 22.22.0 與 26.8.2 各跑過完整隔離套件，全部通過；`npm pack --dry-run` 與 `git diff --check` 也通過。Node 22 使用獨立安裝的 native dependencies，沒有共用 Node 26 的 ABI。
 
 | 測試 | 實際使用的元件與涵蓋範圍 |
 | --- | --- |
@@ -62,11 +62,11 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 ## 瀏覽器驗證
 
-本機互動模式使用 `PI_NATIVE_PREVIEW=1 npm run verify:native`。已在真實瀏覽器登入 fixture，送出 confirm prompt、等待時再送 follow-up、從網頁回答確認，檢查本機 TUI 顯示排隊訊息與後續回答。桌機 1280 px 與手機 390 px 的截圖已用 view_media 檢查，沒有操作權按鈕，dialog、佇列與 composer 不互相遮蔽。證據：`assets/cloud-threads-native-desktop.png`、`assets/cloud-threads-native-mobile.png`。關閉瀏覽器後，以 fixture 印出的 stop URL 清除測試程序與資料。
+本機互動模式使用 `PI_NATIVE_PREVIEW=1 bun run verify:native`。已在真實瀏覽器登入 fixture，送出 confirm prompt、等待時再送 follow-up、從網頁回答確認，檢查本機 TUI 顯示排隊訊息與後續回答。桌機 1280 px 與手機 390 px 的截圖已用 view_media 檢查，沒有操作權按鈕，dialog、佇列與 composer 不互相遮蔽。證據：`assets/cloud-threads-native-desktop.png`、`assets/cloud-threads-native-mobile.png`。關閉瀏覽器後，以 fixture 印出的 stop URL 清除測試程序與資料。
 
 下列為背景 RPC 路徑先前的 smoke test 紀錄；其中的手動接手操作已由自動共享 epoch 取代。
 
-啟動 `node test/compat/browser-fixture.mjs`，使用它印出的 URL 與一次性 fixture token。兩個獨立瀏覽器 session 登入同一 thread，其中一個設為 390 × 844。送出 `smoke-write`，faux provider 會要求**真實 pi bash 工具**在隔離 cwd 寫出 `smoke.txt`；`smoke-check` 讀取同一個檔案與 cwd，`dialog` 產生 pending confirm。
+啟動 `bun run test/compat/browser-fixture.mjs`，使用它印出的 URL 與一次性 fixture token。兩個獨立瀏覽器 session 登入同一 thread，其中一個設為 390 × 844。送出 `smoke-write`，faux provider 會要求**真實 pi bash 工具**在隔離 cwd 寫出 `smoke.txt`；`smoke-check` 讀取同一個檔案與 cwd，`dialog` 產生 pending confirm。
 
 已操作並檢查：建立與多輪輸入、手機／桌機接手、舊裝置停止與 dialog 控制停用、接手後回答原 dialog、Tower 重啟重連、runner 離線仍讀歷史且不能輸入、runner 重啟後再次讀到測試檔案。Fixture 的控制 URL 接受 POST `/restart-tower`、`/runner-offline`、`/runner-online`；結束時 POST `/stop` 清除隔離資料。不要把這些控制路由當成產品 API。
 
@@ -76,11 +76,28 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 
 ## 容器驗證
 
-使用者允許啟動 OrbStack 後，`node test/verify-docker.mjs` 通過。測試建置實際 Dockerfile，使用 Node 22.22.0 Alpine、UID 1000 與獨立 named volumes；主機端為 pi 0.85.1 公開 SDK／RPC 加 faux provider，沒有付費模型呼叫。
+使用者允許啟動 OrbStack 後，`bun run test/verify-docker.mjs` 通過。測試建置實際 Dockerfile，使用 UID 1000 與獨立 named volumes；基底原為 Node 22.22.0 Alpine，2026-09-19 改為 `oven/bun:1.4.2-alpine` 後重跑通過；主機端為 pi 0.85.1 公開 SDK／RPC 加 faux provider，沒有付費模型呼叫。
 
 真實 pi bash 在隔離 workspace 寫檔並同步後，正常停止 Tower，封存整個 `/data`，還原到全新 volume。以非 root 驗證 SQLite integrity、snapshot hash／leaf、標題與 settled 收據一致；重建並替換容器後，原 runner 重新連線，同 ID 命令保留 settled、新命令讀回同 cwd 的檔案，舊 entries 完整保留。這補上 A24 的產品 image 與 volume 還原證據，不代表 Cloudflare Tunnel 或遠端部署已驗證。
 
 測試自行清除專用容器、image、volumes 與隔離目錄，不自動啟動 Docker engine，也不加入預設回歸套件。OrbStack 與隨其啟動的三個既有 VictoriaLogs 容器保持運作，沒有修改其設定或資料。
+
+## 2026-09-19 改用 Bun
+
+Tower 與 runner 改由 Bun 1.4.2 執行。`better-sqlite3` 換成內建的 `bun:sqlite`，`ws` 換成 Bun 內建的實作，runtime dependencies 清空，Docker image 不再安裝任何套件。pi 0.85.1 列入 devDependencies，runner 預設使用這一份，不再以 `npm root -g` 尋找全域安裝；`--pi-package` 仍可指定別的目錄。`bun run build:runner` 把 runner 連同 pi 編成單一執行檔，pi 的 theme、template 與隨附 skill 直接從執行檔內讀取，每個 thread 的 pi host 由執行檔以隱藏子命令重新進入自己。
+
+本機 macOS arm64、Bun 1.4.2、pi 0.85.1 的結果：`bun run verify`、`bun run verify:ui`、`bun run test/verify-docker.mjs` 全部通過；`verify:native` 與 `verify-managed` 另以 `PI_RUNNER_BIN=dist/pi-runner` 對編譯後的執行檔重跑通過，其中 `verify-managed` 注入故障的 runner 仍從原始碼執行。執行檔複製到空目錄、清空環境變數、PATH 上沒有 node／npm／pi 時可以啟動；交叉編譯的 `bun-linux-x64` 版在乾淨的 Debian 容器內通過內建 pi 的版本檢查並取得 writer lock。`bun run verify:phase0` 只剩一項失敗：隔離目錄沒有 `.git`，`verify-native-collaboration` 卻對 repo 根目錄執行 `git fetch`；這項失敗在改用 Bun 之前就存在。
+
+Bun 與 Node 的行為差異，以及對應的處理：
+
+- `bun:sqlite` 的連線物件被垃圾回收時會關閉資料庫，而 Bun 的轉譯器會刪除 `void guard` 這類只為保留參照而寫的敘述，writer lock 因此可能在持有者仍執行時釋放。`lock.mjs` 改為自行持有每個鎖的連線，直到 `close()`；強制垃圾回收後鎖仍互斥。
+- 連線上還有未 finalize 的 statement 時，`close()` 會延後，鎖也跟著留著，同一程序無法重新上鎖。一次性的 statement 改為用完立即 finalize。
+- Bun 的 `ws` 接受 `maxPayload` 卻不執行。瀏覽器 WebSocket 的 512 KiB 上限改在 upgrade handler 檢查，超過仍以 1009 關閉，該 frame 不會送進任何 route。Runner 一側原本的 64 MiB 上限由 Bun 自身的 16 MiB 取代，超過時連線以 1006 中斷。
+- `terminate()` 會在返回前同步觸發 `close`。Tower 改為先登記新連線再終止舊連線，shutdown 先清空連線表再逐一終止。
+- Bun 會把啟動目錄的 `.env` 載入環境變數，pi 的子程序也會繼承。編譯後的執行檔、Docker、shebang 與原始碼模式啟動的 pi host 都已關閉這項行為；直接執行 `bun src/runner.mjs` 時要自行加上 `--no-env-file`。
+- `syncBuiltinESMExports` 在 Bun 下不會更新已具名匯入的函式，runner 的故障注入改用 `bun:test` 的 `mock.module`。`bun:sqlite` 沒有 SQL 自訂函式，snapshot crash 測試改為包住 store 自己的 statement，在同樣 6 個交易邊界送出 SIGKILL。
+
+編譯後的執行檔沒有打包 pi 的圖片縮放 WebAssembly 模組與 clipboard native addon；`--` 之後帶 pi 參數的 relay 模式仍啟動 PATH 上的 `pi`。
 
 ## 驗證範圍與限制
 

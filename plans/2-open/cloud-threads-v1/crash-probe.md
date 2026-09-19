@@ -1,6 +1,6 @@
 # Phase 0 runner crash probe
 
-Status: historical record from 2026-09-14; see [progress](progress.md) for the current state. `runner.mjs` now lives at `src/runner.mjs`. The supervisor proposed below was not adopted. Managed runners instead hold OS-backed SQLite locks (`writer.sqlite` for a headless wrapper's data directory, `runtime.sqlite` for each thread) and refuse to start while a previous child's exit is unconfirmed.
+Status: historical record from 2026-09-14; see [progress](progress.md) for the current state. The commands below predate the move to Bun on 2026-09-19 and now run as `bun run …`. `runner.mjs` now lives at `src/runner.mjs`. The supervisor proposed below was not adopted. Managed runners instead hold OS-backed SQLite locks (`writer.sqlite` for a headless wrapper's data directory, `runtime.sqlite` for each thread) and refuse to start while a previous child's exit is unconfirmed.
 
 ## Result
 
