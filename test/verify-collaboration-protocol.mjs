@@ -5,7 +5,7 @@ import { cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+import { backup as backupDatabase, openDatabase, pragma } from "../src/managed/sqlite.mjs";
 import WebSocket from "ws";
 import { createTower } from "../src/tower.mjs";
 import { commandPayload, payloadHash } from "../src/managed/journal.mjs";
@@ -231,7 +231,7 @@ try {
 	const dispatch = await a.call("thread_delegate", { targetThreadId: c.threadId, requestId: randomUUID(), prompt: "accepted before restart" });
 	assert.equal(dispatch.status, "running");
 	const backup = resolve(temp, "backup.sqlite");
-	const db = new Database(resolve(directory, "tower.sqlite")); await db.backup(backup); db.close();
+	const db = openDatabase(resolve(directory, "tower.sqlite")); backupDatabase(db, backup); db.close();
 	c.close(); await once(c.ws, "close");
 	await until(async () => (await a.call("thread_tasks", { taskId: dispatch.taskId })).tasks[0].status === "unknown", "lost target becomes unknown without restarting Tower");
 	assert.equal((await a.call("thread_tasks", { taskId: delegated.taskId })).tasks[0].status, "completed", "disconnect cannot erase a submitted report");
@@ -251,11 +251,11 @@ try {
 	// A schema-3 catalog must retain metadata and snapshot tables while adding cwd, hostname and task state.
 	await stop();
 	const legacyDir = resolve(temp, "legacy"); mkdirSync(legacyDir);
-	const legacy = new Database(resolve(legacyDir, "tower.sqlite"));
+	const legacy = openDatabase(resolve(legacyDir, "tower.sqlite"));
 	legacy.exec("CREATE TABLE managed_runners (runnerId TEXT PRIMARY KEY, instanceId TEXT NOT NULL); CREATE TABLE threads (threadId TEXT PRIMARY KEY, createKey TEXT UNIQUE NOT NULL, runnerId TEXT NOT NULL, runnerInstanceId TEXT NOT NULL, title TEXT NOT NULL, createdAt TEXT NOT NULL, workspaceId TEXT, piSessionId TEXT, metadataVersion INTEGER NOT NULL DEFAULT 1, updatedAt TEXT, archivedAt TEXT, createTitle TEXT); CREATE TABLE managed_commands (threadId TEXT NOT NULL, commandId TEXT NOT NULL, payloadHash TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(threadId,commandId)); CREATE TABLE sentinel_snapshots (value TEXT); INSERT INTO sentinel_snapshots VALUES ('preserved'); PRAGMA user_version=3;");
 	legacy.close(); directory = legacyDir; await start(); await stop();
-	const migrated = new Database(resolve(legacyDir, "tower.sqlite"));
-	assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+	const migrated = openDatabase(resolve(legacyDir, "tower.sqlite"));
+	assert.equal(pragma(migrated, "user_version"), 5);
 	assert.equal(migrated.prepare("SELECT value FROM sentinel_snapshots").get().value, "preserved");
 	for (const column of ["cwd", "hostname"]) assert.ok(migrated.prepare("SELECT name FROM pragma_table_info('threads') WHERE name=?").get(column), column);
 	assert.ok(migrated.prepare("SELECT name FROM sqlite_master WHERE name='managed_collaboration_tasks'").get()); migrated.close();

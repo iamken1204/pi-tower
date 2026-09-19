@@ -39,7 +39,7 @@ export function formatRunners(runners) {
 }
 
 export async function runTask({ tower, token, runnerId, session, prompt, fresh, signal, onDelta }) {
-	// { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
+	// { headers } is a Node (undici) and Bun WebSocket extension, not the WHATWG standard. pi loads this file under Node.
 	const ws = new WebSocket(
 		`${tower}/attach?runner=${encodeURIComponent(runnerId)}` + (session ? `&session=${encodeURIComponent(session)}` : ""),
 		{ headers: { authorization: `Bearer ${token}` } },

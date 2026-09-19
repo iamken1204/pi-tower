@@ -59,7 +59,7 @@ function start(extra = []) {
 }
 
 try {
-	console.log(`versions: Node ${process.version}, pi ${JSON.parse(readFileSync(resolve(pkg, "package.json"))).version}`);
+	console.log(`versions: Bun ${Bun.version}, pi ${JSON.parse(readFileSync(resolve(pkg, "package.json"))).version}`);
 	const pi = start();
 	const blank = await pi.request("get_state");
 	assert.ok(blank.sessionId);

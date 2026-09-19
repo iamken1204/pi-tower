@@ -15,7 +15,7 @@ try {
 	symlinkSync(resolve(root, "node_modules"), resolve(cwd, "node_modules"), "dir");
 	const env = { PATH: `${dirname(process.execPath)}:${process.env.PATH}`, HOME: resolve(temp, "home"),
 		PI_CODING_AGENT_DIR: resolve(temp, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg };
-	execFileSync("npm", ["run", "verify"], { cwd, env, stdio: "inherit", timeout: 300_000 });
+	execFileSync(process.execPath, ["run", "verify"], { cwd, env, stdio: "inherit", timeout: 300_000 });
 } finally {
 	rmSync(temp, { recursive: true, force: true });
 }

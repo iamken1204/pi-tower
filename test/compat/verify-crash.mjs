@@ -138,7 +138,7 @@ try {
 	await probe("busy");
 	await probe("real-idle");
 	await probe("real-dialog");
-	console.log(`versions: node=${process.version}`);
+	console.log(`versions: bun=${Bun.version}`);
 	console.log("verify-crash: current runner exhibits orphan survival in idle and busy cases");
 } finally {
 	for (const pid of [...owned]) await stopOwned(pid);

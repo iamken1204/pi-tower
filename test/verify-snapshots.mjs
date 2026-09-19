@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import Database from "better-sqlite3";
+import { openDatabase, pragma } from "../src/managed/sqlite.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -20,7 +20,7 @@ function bytes(counter, entries, previous = null, leafId = entries.at(-1)?.id ??
 const expectCode = (fn, code) => assert.throws(fn, (error) => error.code === code);
 let db;
 try {
-	db = new Database(path); db.pragma("journal_mode=WAL"); db.pragma("synchronous=FULL");
+	db = openDatabase(path); pragma(db, "journal_mode=WAL"); pragma(db, "synchronous=FULL");
 	let store = createSnapshotStore(db, { maxSnapshotBytes: 4096, maxTotalBytes: 8192 });
 	const a = entry("a", null, { unknownPayload: { kept: true } });
 	const branch = entry("branch", "a");
@@ -37,12 +37,12 @@ try {
 	assert.deepEqual(store.history(ids.threadId, second.revision, 1, 1), { revision: second.revision, hash: second.hash, leafId: "main", entries: [branch], nextCursor: 2 });
 	const missingBranch = bytes(3, [a, main], { revision: second.revision, hash: second.hash }, "main");
 	expectCode(() => store.commit(missingBranch, ids), "snapshot_not_append_superset");
-	db.close(); db = new Database(path); store = createSnapshotStore(db, { maxSnapshotBytes: 4096, maxTotalBytes: 8192 });
+	db.close(); db = openDatabase(path); store = createSnapshotStore(db, { maxSnapshotBytes: 4096, maxTotalBytes: 8192 });
 	expectCode(() => store.commit(bytes(3, [a, branch, main], { revision: first.revision, hash: first.hash }), ids), "snapshot_stale_predecessor");
 	expectCode(() => store.commit(Buffer.alloc(4097), ids), "snapshot_too_large");
 	await store.backup(backup);
-	const copy = new Database(backup, { readonly: true });
-	assert.equal(copy.pragma("integrity_check", { simple: true }), "ok");
+	const copy = openDatabase(backup, { readonly: true });
+	assert.equal(pragma(copy, "integrity_check"), "ok");
 	const restored = createSnapshotStore(copy).latest(ids.threadId);
 	assert.equal(restored.hash, second.hash); assert.equal(restored.envelope.leafId, "main"); copy.close();
 	const thirdBytes = bytes(3, [a, branch, main, entry("later", "main")], { revision: second.revision, hash: second.hash });

@@ -20,7 +20,7 @@ if (process.argv[2] !== "worker") {
 	const pkg = process.env.PI_COMPAT_PACKAGE;
 	const api = await import(pathToFileURL(`${pkg}/dist/index.js`));
 	const { fauxProvider, fauxAssistantMessage } = await import(pathToFileURL(`${pkg}/node_modules/@earendil-works/pi-ai/dist/index.js`));
-	console.log(`collaboration public API: Node ${process.version}, pi ${JSON.parse(readFileSync(`${pkg}/package.json`)).version}`);
+	console.log(`collaboration public API: Bun ${Bun.version}, pi ${JSON.parse(readFileSync(`${pkg}/package.json`)).version}`);
 	let activeTask, release, entered;
 	const reports = [];
 	const factory = async (options) => {

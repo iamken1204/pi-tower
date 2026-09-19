@@ -1,19 +1,19 @@
 // Fault injection around this project's persistence/RPC boundary, not pi internals.
 import fs from "node:fs";
 import childProcess from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
+import { mock } from "bun:test";
 
 const [boundary, runnerFile, ...args] = process.argv.slice(2);
 const crash = () => process.kill(process.pid, "SIGKILL");
 const rename = fs.renameSync;
-fs.renameSync = (from, to) => {
+const renameSync = (from, to) => {
 	const status = to.includes("/commands/") ? JSON.parse(fs.readFileSync(from, "utf8")).status : null;
 	if (status && boundary === `before_${status}`) crash();
 	rename(from, to);
 	if (status && boundary === status) crash();
 };
 const spawn = childProcess.spawn;
-childProcess.spawn = (...args) => {
+const spawnChild = (...args) => {
 	const child = spawn(...args);
 	const write = child.stdin.write.bind(child.stdin);
 	child.stdin.write = (chunk, ...rest) => {
@@ -25,6 +25,7 @@ childProcess.spawn = (...args) => {
 	};
 	return child;
 };
-syncBuiltinESMExports();
+mock.module("node:fs", () => ({ ...fs, renameSync }));
+mock.module("node:child_process", () => ({ ...childProcess, spawn: spawnChild }));
 process.argv = [process.execPath, runnerFile, ...args];
 await import(runnerFile);

@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 node_version="22.23.2"
 node_dir="$HOME/.local/node-v$node_version"
 
+# Tower and the runner run on Bun; the pi CLI itself still needs Node.
 echo "==> Ensuring Node.js $node_version"
 if [[ ! -x "$node_dir/bin/node" ]]; then
 	tmp_dir="$(mktemp -d)"
@@ -22,9 +23,23 @@ for command in node npm npx corepack; do
 done
 export PATH="$HOME/.local/bin:$PATH"
 
+bun_version="1.4.2"
+bun_dir="$HOME/.local/bun-v$bun_version"
+
+echo "==> Ensuring Bun $bun_version"
+if [[ ! -x "$bun_dir/bun" ]]; then
+	bun_tmp="$(mktemp -d)"
+	curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun_version/bun-linux-x64.zip" -o "$bun_tmp/bun.zip"
+	echo "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913  $bun_tmp/bun.zip" | sha256sum --check --status
+	mkdir -p "$bun_dir"
+	unzip -q -j "$bun_tmp/bun.zip" -d "$bun_dir"
+	rm -rf "$bun_tmp"
+fi
+ln -sfn "$bun_dir/bun" "$HOME/.local/bin/bun"
+
 echo "==> Installing locked project dependencies"
 cd "$repo_root"
-npm ci --no-audit --no-fund
+bun install --frozen-lockfile
 
 echo "==> Ensuring the pi CLI"
 pi_prefix="$HOME/.local/share/pi-tower"

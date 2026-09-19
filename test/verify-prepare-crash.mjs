@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { syncBuiltinESMExports } from "node:module";
+import { mock } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -10,13 +10,13 @@ import { readJson, loadCheckpoint } from "../src/managed/storage.mjs";
 if (process.argv[2] === "--worker") {
 	const [, , , dir, threadId, boundary] = process.argv;
 	const rename = fs.renameSync;
-	fs.renameSync = (from, to) => {
+	const renameSync = (from, to) => {
 		const publish = to === resolve(dir, "data/threads", threadId);
 		if (publish && boundary === "before") process.kill(process.pid, "SIGKILL");
 		rename(from, to);
 		if (publish && boundary === "after") process.kill(process.pid, "SIGKILL");
 	};
-	syncBuiltinESMExports(); // Test-only filesystem fault injection, never patch pi.
+	mock.module("node:fs", () => ({ ...fs, renameSync })); // Test-only filesystem fault injection, never patch pi.
 	const { ManagedRunner } = await import("../src/managed/runner.mjs");
 	new ManagedRunner({ dataDir: resolve(dir, "data"), cwd: dir, id: "prepare-test", piPackage: resolve(dir, "fake-pi") }).prepare(threadId);
 	throw new Error("crash boundary did not fire");

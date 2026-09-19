@@ -56,7 +56,7 @@ try {
 	for (const volume of volumes) docker("volume", "create", volume);
 	await start(volumes[0]);
 	assert.equal(docker("exec", name, "id", "-u"), "1000");
-	assert.equal(docker("exec", name, "node", "--version"), "v22.22.0");
+	assert.equal(docker("exec", name, "bun", "--version"), "1.4.2");
 	assert.ok((await fetch(`http://127.0.0.1:${port}/threads`)).ok);
 	for (const dir of ["home", "agent/extensions", "workspace", "runner", "backup"]) mkdirSync(resolve(temp, dir), { recursive: true });
 	cpSync(resolve(root, "test/compat/managed-extension.mjs"), resolve(temp, "agent/extensions/fixture.js"));
@@ -81,13 +81,13 @@ try {
 		"sh", "-c", "tar -C /data -czf /backup/data.tgz .");
 	docker("run", "--rm", "--user", "0", "-v", `${volumes[1]}:/data`, "-v", `${temp}/backup:/backup`, image,
 		"sh", "-c", "tar -C /data -xzf /backup/data.tgz");
-	const inspect = `import assert from 'node:assert/strict'; import Database from 'better-sqlite3'; import {createSnapshotStore} from './src/managed/snapshots.mjs';
-		const db=new Database('/data/tower.sqlite',{readonly:true}); assert.equal(db.pragma('integrity_check',{simple:true}),'ok');
+	const inspect = `import assert from 'node:assert/strict'; import {openDatabase,pragma} from './src/managed/sqlite.mjs'; import {createSnapshotStore} from './src/managed/snapshots.mjs';
+		const db=openDatabase('/data/tower.sqlite',{readonly:true}); assert.equal(pragma(db,'integrity_check'),'ok');
 		const snapshot=createSnapshotStore(db).latest('${created.threadId}');
 		assert.equal(snapshot.hash,'${before.hash}'); assert.equal(snapshot.envelope.leafId,${JSON.stringify(before.leafId)});
 		assert.equal(db.prepare('SELECT title FROM threads WHERE threadId=?').get('${created.threadId}').title,'Docker continuity');
 		assert.equal(JSON.parse(db.prepare('SELECT receipt FROM managed_commands WHERE commandId=?').get('${commandId}').receipt).status,'settled'); db.close();`;
-	docker("run", "--rm", "-v", `${volumes[1]}:/data`, image, "node", "--input-type=module", "-e", inspect);
+	docker("run", "--rm", "-v", `${volumes[1]}:/data`, image, "bun", "-e", inspect);
 	// Rebuild and replace the container, with the original runner and restored volume.
 	docker("build", "-t", image, ".");
 	await start(volumes[1]);
@@ -102,7 +102,7 @@ try {
 	const results = after.entries.slice(before.entries.length).filter((entry) => entry.message?.role === "toolResult");
 	assert.ok(JSON.stringify(results).includes("cloud-threads-smoke-73"));
 	assert.ok(JSON.stringify(results).includes(resolve(temp, "workspace")));
-	console.log("ok Docker: Node22 Alpine/non-root image, full SQLite archive restored to new volume, hash/leaf/catalog/receipt intact, rebuild/reconnect and real pi bash continuation in original cwd");
+	console.log("ok Docker: Bun Alpine/non-root image, full SQLite archive restored to new volume, hash/leaf/catalog/receipt intact, rebuild/reconnect and real pi bash continuation in original cwd");
 } finally {
 	client?.close();
 	if (runner && runner.exitCode === null && runner.signalCode === null) { const exited = once(runner, "exit"); runner.kill("SIGTERM"); await exited; }

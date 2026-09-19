@@ -11,7 +11,7 @@ await once(server, "listening");
 const port = server.address().port;
 
 const runner = spawn(
-	"node",
+	process.execPath,
 	["src/runner.mjs", "--hq", `ws://127.0.0.1:${port}`, "--id", "chain-test", "--token", TOKEN, "--", "--no-session"],
 	{ stdio: ["ignore", "inherit", "inherit"] },
 );

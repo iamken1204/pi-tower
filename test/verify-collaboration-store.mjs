@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import Database from "better-sqlite3";
+import { openDatabase } from "../src/managed/sqlite.mjs";
 import { COLLABORATION_METADATA_BYTES, COLLABORATION_PAGE_MAX, COLLABORATION_TEXT_BYTES, createCollaborationStore } from "../src/managed/collaboration-store.mjs";
 
 const directory = mkdtempSync(resolve(tmpdir(), "pi-collaboration-store-"));
-let db = new Database(resolve(directory, "tower.db"));
+let db = openDatabase(resolve(directory, "tower.db"));
 const ids = { source: randomUUID(), target: randomUUID(), other: randomUUID(), instance: randomUUID() };
 const input = (overrides = {}) => ({ sourceThreadId: ids.source, targetThreadId: ids.target, targetRunnerInstanceId: ids.instance,
 	requestId: randomUUID(), prompt: "do work", sourceRunnerId: "runner-a", targetRunnerId: "runner-b", sourceName: "A", targetName: "B", ...overrides });
@@ -63,7 +63,7 @@ try {
 	const recoverDispatching = store.create(input()).task;
 	assert.throws(() => store.updateByCommand(ids.other, { commandId: recoverDispatching.commandId, status: "accepted" }), /unknown_collaboration_command/);
 	db.close();
-	db = new Database(resolve(directory, "tower.db"));
+	db = openDatabase(resolve(directory, "tower.db"));
 	store = createCollaborationStore(db);
 	assert.equal(store.recover(), 4);
 	for (const id of [recoverAccepted.taskId, recoverRunning.taskId, recoverDispatching.taskId]) assert.equal(store.get(id).status, "unknown");

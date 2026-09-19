@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import Database from "better-sqlite3";
+import { backup, openDatabase } from "../src/managed/sqlite.mjs";
 import { createCollaborationStore } from "../src/managed/collaboration-store.mjs";
 import { deliverResult } from "../src/managed/collaboration-runtime.mjs";
 import { ManagedRunner } from "../src/managed/runner.mjs";
@@ -23,12 +23,12 @@ try {
 	// Simulated boundary: Tower backup exists before task creation; the caller retained
 	// the admitted task envelope and reconciles it after restoring that older backup.
 	const liveFile = resolve(root, "live.sqlite"), backupFile = resolve(root, "before-task.sqlite");
-	let db = new Database(liveFile), store = createCollaborationStore(db);
-	await db.backup(backupFile);
+	let db = openDatabase(liveFile), store = createCollaborationStore(db);
+	backup(db, backupFile);
 	const admitted = store.create(request).task;
 	db.close();
 	cpSync(backupFile, liveFile);
-	db = new Database(liveFile); store = createCollaborationStore(db);
+	db = openDatabase(liveFile); store = createCollaborationStore(db);
 	const recovered = store.reconcile({ ...request, taskId: admitted.taskId, commandId: admitted.commandId });
 	assert.equal(recovered.taskId, admitted.taskId, "reconstitution preserves the admitted task ID");
 	assert.equal(recovered.commandId, admitted.commandId, "reconstitution preserves the admitted command ID");
@@ -41,12 +41,12 @@ try {
 	assert.equal(withEvidence.status, "unknown");
 	assert.equal(withEvidence.started, true);
 	const beforeReport = resolve(root, "before-report.sqlite");
-	await db.backup(beforeReport);
+	backup(db, beforeReport);
 	const firstReport = store.report(ids.target, { taskId: admitted.taskId, outcome: "completed", summary: "original result" });
 	assert.equal(firstReport.result.notificationId, admitted.taskId);
 	db.close();
 	cpSync(beforeReport, liveFile);
-	db = new Database(liveFile); store = createCollaborationStore(db);
+	db = openDatabase(liveFile); store = createCollaborationStore(db);
 	const restoredReport = store.report(ids.target, { taskId: admitted.taskId, outcome: "completed", summary: "original result" });
 	assert.equal(restoredReport.result.notificationId, firstReport.result.notificationId, "restore-before-report reproduces notification identity");
 	db.close();

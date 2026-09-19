@@ -89,7 +89,7 @@ export default function(pi) {
 		const noReport = await call(a, "thread_delegate", { requestId: randomUUID(), targetThreadId: b.threadId, prompt: "no-report" });
 		await until(async () => (await call(a, "thread_tasks", { taskId: noReport.taskId })).tasks[0]?.status === "unknown", "ordinary answer stays unknown");
 		assert.equal((await call(a, "thread_tasks", { taskId: noReport.taskId })).tasks[0].result, null);
-		console.log(`ok real pi ${JSON.parse(readFileSync(resolve(process.env.PI_COMPAT_PACKAGE, "package.json"))).version}, Node ${process.version}: cross-project discovery, parallel targets, nonblocking source, FIFO writer, explicit reports, auto receipt, dedup and unknown`);
+		console.log(`ok real pi ${JSON.parse(readFileSync(resolve(process.env.PI_COMPAT_PACKAGE, "package.json"))).version}, Bun ${Bun.version}: cross-project discovery, parallel targets, nonblocking source, FIFO writer, explicit reports, auto receipt, dedup and unknown`);
 	} finally {
 		writeFileSync(resolve(dir, "release"), "cleanup");
 		for (const { runner } of runners) await runner.close();

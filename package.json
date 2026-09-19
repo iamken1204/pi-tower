@@ -31,19 +31,15 @@
 		"LICENSE"
 	],
 	"scripts": {
-		"verify:ui": "node test/verify-ui.mjs",
-		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs && node test/compat/verify-pi.mjs && node test/compat/verify-crash.mjs && node test/verify-managed.mjs && node test/verify-journal.mjs && node test/verify-snapshots.mjs && node test/verify-snapshot-crash.mjs && node test/verify-managed-limits.mjs && node test/verify-prepare-crash.mjs && npm run verify:native && npm run verify:collaboration",
-		"verify:phase0": "node test/compat/verify-isolated.mjs",
-		"verify:native": "node test/verify-native.mjs",
-		"verify:collaboration": "node test/compat/verify-collaboration-api.mjs && node test/verify-collaboration-store.mjs && node test/verify-collaboration-recovery.mjs && node test/verify-collaboration-protocol.mjs && node test/verify-collaboration.mjs && node test/verify-native-collaboration.mjs",
-		"prepublishOnly": "npm run verify"
+		"verify:ui": "bun run test/verify-ui.mjs",
+		"verify": "bun run test/verify-tower.mjs && bun run test/verify-chain.mjs && bun run test/verify-extension.mjs && bun run test/verify-package.mjs && bun run test/compat/verify-pi.mjs && bun run test/compat/verify-crash.mjs && bun run test/verify-managed.mjs && bun run test/verify-journal.mjs && bun run test/verify-snapshots.mjs && bun run test/verify-snapshot-crash.mjs && bun run test/verify-managed-limits.mjs && bun run test/verify-prepare-crash.mjs && bun run verify:native && bun run verify:collaboration",
+		"verify:phase0": "bun run test/compat/verify-isolated.mjs",
+		"verify:native": "bun run test/verify-native.mjs",
+		"verify:collaboration": "bun run test/compat/verify-collaboration-api.mjs && bun run test/verify-collaboration-store.mjs && bun run test/verify-collaboration-recovery.mjs && bun run test/verify-collaboration-protocol.mjs && bun run test/verify-collaboration.mjs && bun run test/verify-native-collaboration.mjs",
+		"prepublishOnly": "bun run verify"
 	},
 	"engines": {
-		"node": ">=22.22.0"
-	},
-	"dependencies": {
-		"better-sqlite3": "13.0.3",
-		"ws": "^8.18.0"
+		"bun": ">=1.4.2"
 	},
 	"peerDependencies": {
 		"typebox": "*"

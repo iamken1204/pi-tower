@@ -8,9 +8,8 @@ import { existsSync } from "node:fs";
 import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./collaboration-runtime.mjs";
 
 const [packageDir, recordFile] = process.argv.slice(2);
-const writerGuard = holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
-// Retain the lock through every exit callback; only OS process teardown releases it.
-process.on("exit", () => { void writerGuard; });
+// Never closed: only OS process teardown releases this lock.
+holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
 const record = readJson(recordFile);
 const saved = loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, process.cwd());
 const api = await import(pathToFileURL(`${packageDir}/dist/index.js`));

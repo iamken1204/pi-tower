@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import Database from "better-sqlite3";
+import { openDatabase, pragma } from "../src/managed/sqlite.mjs";
 import { createSnapshotStore } from "../src/managed/snapshots.mjs";
 
 const ids = {
@@ -34,32 +34,41 @@ const secondBytes = snapshot(2, newEntries, firstReceipt);
 const secondHash = createHash("sha256").update(secondBytes).digest("hex");
 
 function open(path) {
-	const db = new Database(path);
-	db.pragma("journal_mode=WAL");
-	db.pragma("synchronous=FULL");
-	db.pragma("wal_autocheckpoint=0");
+	const db = openDatabase(path);
+	pragma(db, "journal_mode=WAL");
+	pragma(db, "synchronous=FULL");
+	pragma(db, "wal_autocheckpoint=0");
 	return db;
 }
 
-function installCrashTrigger(db, boundary) {
-	db.function("crash_at_snapshot_boundary", () => process.kill(process.pid, "SIGKILL"));
-	const trigger = {
-		before_blob_insert: "BEFORE INSERT ON managed_snapshot_index WHEN NEW.counter=2",
-		after_blob_insert: "AFTER INSERT ON managed_snapshot_index WHEN NEW.counter=2",
-		before_latest_update: "BEFORE UPDATE ON managed_snapshot_latest WHEN NEW.counter=2",
-		after_latest_update: "AFTER UPDATE ON managed_snapshot_latest WHEN NEW.counter=2",
-		before_prune: "BEFORE UPDATE OF blob ON managed_snapshot_index WHEN OLD.counter=1 AND NEW.blob IS NULL",
-		after_prune: "AFTER UPDATE OF blob ON managed_snapshot_index WHEN OLD.counter=1 AND NEW.blob IS NULL",
-	}[boundary];
-	assert.ok(trigger, `unknown crash boundary: ${boundary}`);
-	db.exec(`CREATE TEMP TRIGGER injected_crash ${trigger} BEGIN SELECT crash_at_snapshot_boundary(); END`);
+// bun:sqlite has no user-defined SQL functions for a trigger to call, so the fault wraps the
+// store's own statement: the process dies with that write either not begun or uncommitted.
+function installCrash(db, boundary) {
+	const [when, statement] = {
+		before_blob_insert: ["before", "INSERT INTO managed_snapshot_index"],
+		after_blob_insert: ["after", "INSERT INTO managed_snapshot_index"],
+		before_latest_update: ["before", "INSERT INTO managed_snapshot_latest"],
+		after_latest_update: ["after", "INSERT INTO managed_snapshot_latest"],
+		before_prune: ["before", "UPDATE managed_snapshot_index SET blob=NULL"],
+		after_prune: ["after", "UPDATE managed_snapshot_index SET blob=NULL"],
+	}[boundary] ?? [];
+	assert.ok(statement, `unknown crash boundary: ${boundary}`);
+	const crash = () => process.kill(process.pid, "SIGKILL");
+	const prepare = db.prepare.bind(db);
+	db.prepare = (sql) => {
+		const prepared = prepare(sql);
+		if (!sql.startsWith(statement)) return prepared;
+		const run = prepared.run.bind(prepared);
+		prepared.run = (...values) => { if (when === "before") crash(); run(...values); crash(); };
+		return prepared;
+	};
 }
 
 if (process.argv[2] === "--worker") {
 	const [, , , path, boundary] = process.argv;
 	const db = open(path);
+	if (boundary !== "after_commit_before_ack") installCrash(db, boundary);
 	const store = createSnapshotStore(db, { maxSnapshotBytes: 8192, maxTotalBytes: 16384 });
-	if (boundary !== "after_commit_before_ack") installCrashTrigger(db, boundary);
 	store.commit(secondBytes, ids);
 	if (boundary === "after_commit_before_ack") process.kill(process.pid, "SIGKILL");
 	throw new Error(`fault injection did not fire: ${boundary}`);
@@ -83,7 +92,7 @@ function initialize(path) {
 function verifyRestart(path, expectNew) {
 	const db = open(path);
 	try {
-		assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
+		assert.equal(pragma(db, "integrity_check"), "ok");
 		const dangling = db.prepare(`SELECT COUNT(*) count FROM managed_snapshot_latest l LEFT JOIN managed_snapshot_index i
 			ON i.thread_id=l.thread_id AND i.generation_id=l.generation_id AND i.counter=l.counter WHERE i.thread_id IS NULL`).get().count;
 		assert.equal(dangling, 0, "latest pointer must always reference an index row");
@@ -99,7 +108,7 @@ function verifyRestart(path, expectNew) {
 		assert.equal(rows.at(-1).byte_length, expectedBytes.length);
 		assert.equal(rows.at(-1).leaf_id, latest.envelope.leafId);
 		if (expectNew) assert.equal(rows[0].blob, null, "superseded BLOB was not pruned atomically");
-		else assert.deepEqual(rows[0].blob, firstBytes, "old BLOB changed during rolled-back commit");
+		else assert.deepEqual(Buffer.from(rows[0].blob), firstBytes, "old BLOB changed during rolled-back commit");
 		return { db, latest };
 	} catch (error) {
 		db.close();
@@ -145,15 +154,15 @@ try {
 	try {
 		const store = createSnapshotStore(full, { maxSnapshotBytes: 2 * 1024 * 1024, maxTotalBytes: 4 * 1024 * 1024 });
 		const large = snapshot(2, [...oldEntries, entry("large", "old-leaf", "x".repeat(1024 * 1024))], firstReceipt);
-		full.pragma(`max_page_count=${full.pragma("page_count", { simple: true }) + 1}`);
+		pragma(full, `max_page_count=${pragma(full, "page_count") + 1}`);
 		assert.throws(() => store.commit(large, ids), (error) => error.code === "SQLITE_FULL");
 		assert.equal(store.latest(ids.threadId).hash, firstHash);
-		assert.equal(full.pragma("integrity_check", { simple: true }), "ok");
-		full.pragma("max_page_count=2147483646");
+		assert.equal(pragma(full, "integrity_check"), "ok");
+		pragma(full, "max_page_count=2147483646");
 		const lock = spawn(process.execPath, [import.meta.filename, "--hold", fullPath], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
 		await once(lock, "message");
 		try {
-			full.pragma("busy_timeout=1250");
+			pragma(full, "busy_timeout=1250");
 			const started = performance.now();
 			assert.throws(() => store.commit(large, ids), (error) => error.code === "SQLITE_BUSY");
 			const elapsed = performance.now() - started;

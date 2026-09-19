@@ -1,5 +1,5 @@
 // Phase-1 catalog and isolated programmatic transport. No raw pi RPC reaches managed children.
-import Database from "better-sqlite3";
+import { openDatabase, pragma } from "./sqlite.mjs";
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { statSync, statfsSync } from "node:fs";
@@ -22,12 +22,12 @@ export function createManagedTower(dataDir, {
 } = {}) {
 	for (const value of [maxSnapshotBytes, maxTotalBytes, minFreeBytes, maxUploads, maxViewerBuffer]) if (!Number.isSafeInteger(value) || value < 1) throw new Error("invalid_managed_limit");
 	privateDirectory(dataDir);
-	const db = new Database(resolve(dataDir, "tower.sqlite"));
-	db.pragma("journal_mode = WAL");
-	db.pragma("synchronous = FULL");
-	db.pragma("busy_timeout = 1250");
-	db.pragma("wal_autocheckpoint = 1000");
-	const schema = db.pragma("user_version", { simple: true });
+	const db = openDatabase(resolve(dataDir, "tower.sqlite"));
+	pragma(db, "journal_mode = WAL");
+	pragma(db, "synchronous = FULL");
+	pragma(db, "busy_timeout = 1250");
+	pragma(db, "wal_autocheckpoint = 1000");
+	const schema = pragma(db, "user_version");
 	if (schema > 5) { db.close(); throw new Error("unsupported_tower_schema"); }
 	db.transaction(() => {
 		db.exec(`CREATE TABLE IF NOT EXISTS managed_runners (runnerId TEXT PRIMARY KEY, instanceId TEXT NOT NULL);
@@ -49,7 +49,7 @@ export function createManagedTower(dataDir, {
 	collaboration.recover();
 	const snapshots = createSnapshotStore(db, { maxSnapshotBytes, maxTotalBytes });
 	let uploads = 0;
-	const checkpointTimer = setInterval(() => { try { db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* Busy timeout is bounded; committed WAL remains durable. */ } }, 60_000);
+	const checkpointTimer = setInterval(() => { try { pragma(db, "wal_checkpoint(PASSIVE)"); } catch { /* Busy timeout is bounded; committed WAL remains durable. */ } }, 60_000);
 	checkpointTimer.unref();
 	const freeBytes = () => { const fs = statfsSync(dataDir); return fs.bavail * fs.bsize; };
 	const requireDiskSpace = () => { if (freeBytes() < minFreeBytes) throw new Error("disk_space_low"); };
@@ -80,7 +80,7 @@ export function createManagedTower(dataDir, {
 	const connections = (runnerId) => [...runners.values()].filter((runner) => runner.id === runnerId && runner.ready);
 	const host = (row) => { const runner = hosts.get(row.threadId); return runner?.ready ? runner : undefined; };
 	// Where a runner can host new threads: every directory one of its processes started in or already has a thread in.
-	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").pluck().all(runnerId)])].sort();
+	const workspaces = (runnerId) => [...new Set([...connections(runnerId).map((runner) => runner.cwd), ...db.prepare("SELECT DISTINCT cwd FROM threads WHERE runnerId=? AND cwd IS NOT NULL").all(runnerId).map((row) => row.cwd)])].sort();
 	const isActive = (row) => !row.archivedAt && !!host(row) && AWAKE.has(liveStates.get(row.threadId)?.state);
 	const permit = (principal, action, resource) => { if (!policy(principal, action, resource)) throw Object.assign(new Error("forbidden"), { status: 403 }); };
 	const visibleThread = (principal, threadId) => { const row = thread(threadId); permit(principal, "read", describe(row)); return row; };
@@ -581,13 +581,16 @@ export function createManagedTower(dataDir, {
 		routes: { "/managed/runner": handleRunner, "/managed/client": handleClient },
 		close() {
 			clearInterval(checkpointTimer);
-			for (const viewers of clients.values()) for (const client of viewers) client.terminate();
+			// Emptied first: terminate() may emit close before it returns, and shutdown must not run the disconnect paths.
+			const viewers = [...clients.values()].flatMap((set) => [...set]);
+			const connected = [...runners.values()];
 			clients.clear();
-			for (const runner of runners.values()) {
+			runners.clear();
+			for (const client of viewers) client.terminate();
+			for (const runner of connected) {
 				for (const p of runner.pending.values()) { clearTimeout(p.timer); p.reject(new Error("tower_shutdown_unknown")); }
 				runner.ws.terminate();
 			}
-			runners.clear();
 			db.close();
 		} };
 }

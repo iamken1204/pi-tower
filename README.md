@@ -41,14 +41,14 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
-Requires Node.js 22.22.0 or newer. Compatibility checks passed with pi 0.85.1 on Node 22.22.0 and 26.8.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
+Tower and the runner require Bun 1.4.2 or newer; the pi extension and `pi-task` run wherever pi does. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
 
 Three roles, each runnable on any machine (even all three on one box); the runner and interactive sides also need `pi` installed.
 
 **Tower** (any host the runner and interactive sides can both reach)
 
 ```sh
-npx pi-tower --port 9000 --token <shared-token>   # or --token-file /path/to/token
+bunx pi-tower --port 9000 --token <shared-token>   # or --token-file /path/to/token
 ```
 
 Or with Docker plus a Cloudflare Tunnel (no exposed port, TLS terminates at the edge):
@@ -64,12 +64,12 @@ Open `https://<that-hostname>/` and enter the shared token to view live runner a
 
 The token admits a request but does not say who sent it. When Tower is reachable only through a proxy that authenticates people and sets or overwrites an identity header, such as Cloudflare Access (`cf-access-authenticated-user-email`) or oauth2-proxy (`x-forwarded-user`), pass that header name as `--subject-header` / `PI_TOWER_SUBJECT_HEADER`. Tower then records the value on every command receipt as `actor.subject`; a request carrying an empty or over-long value is rejected. Do not set it while Tower is reachable directly, since any token holder could then choose the name. Without it, receipts record `{ kind: "user" }`.
 
-Permissions are a programmatic port. Embedding Tower from Node with `createTower({ policy })` supplies `policy(principal, action, resource)`, a function returning whether the action is allowed; the CLI has no flag for it, and the default lets every token holder do everything. `principal` is `{ kind: "user", subject? }` for a person and `{ kind: "thread", threadId, runnerId }` for a thread acting through its runner. `action` is `read`, `prompt`, `abort`, `extension_ui_response`, `sleep`, `create`, `restore` or `update`. `resource` is the thread description (`threadId`, `runnerId`, `cwd`, `project`, `hostname`, `title` and more) or, for runner listings and `create`, `{ runnerId, cwd? }`. A denied read hides the thread from listings, the home page, `thread_list` and the stream, which closes with code 1008; a denied action answers 403 over HTTP or `forbidden` over WebSocket. A thread renaming itself passes as `update` with the thread principal, and a denied rename stays local on the runner. Read permission is checked when a stream opens, not on every frame; a listing page can come back short when it hid threads, and its cursor never names one. Policy covers Cloud Threads only; the legacy relay and `/api/managed/usage` ask nothing beyond the token.
+Permissions are a programmatic port. Embedding Tower from Bun with `createTower({ policy })` supplies `policy(principal, action, resource)`, a function returning whether the action is allowed; the CLI has no flag for it, and the default lets every token holder do everything. `principal` is `{ kind: "user", subject? }` for a person and `{ kind: "thread", threadId, runnerId }` for a thread acting through its runner. `action` is `read`, `prompt`, `abort`, `extension_ui_response`, `sleep`, `create`, `restore` or `update`. `resource` is the thread description (`threadId`, `runnerId`, `cwd`, `project`, `hostname`, `title` and more) or, for runner listings and `create`, `{ runnerId, cwd? }`. A denied read hides the thread from listings, the home page, `thread_list` and the stream, which closes with code 1008; a denied action answers 403 over HTTP or `forbidden` over WebSocket. A thread renaming itself passes as `update` with the thread principal, and a denied rename stays local on the runner. Read permission is checked when a stream opens, not on every frame; a listing page can come back short when it hid threads, and its cursor never names one. Policy covers Cloud Threads only; the legacy relay and `/api/managed/usage` ask nothing beyond the token.
 
 **Runner** (the machine that executes tasks: a CI box, a lab PC, a server)
 
 ```sh
-npx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/token -- --no-session
+bunx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/token -- --no-session
 ```
 
 The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
@@ -153,7 +153,7 @@ The legacy relay (`/runner`, `/runner-session`, `/attach`, `pi-task` and the `ru
 ## Verify
 
 ```sh
-npm run verify:phase0 # all checks in a disposable workspace with an empty pi profile
+bun run verify:phase0 # all checks in a disposable workspace with an empty pi profile
 ```
 
 The four legacy scripts cover relay semantics, a real no-LLM RPC chain, extension/CLI behavior and package loading. Additional probes cover full-tree SDK restoration, UTF-8 framing, wrapper crashes and managed thread persistence. Real pi tests use scripted providers and isolated credentials; `PI_COMPAT_PACKAGE` can specify the installed pi package directory.
@@ -189,9 +189,9 @@ Tower limits default to a 256 KiB prompt or dialog response, 512 KiB managed Web
 
 Native extension select/confirm/input dialogs can be answered from either interface; the first answer closes the other prompt. Extension editor dialogs stay local, with a browser notice to use the terminal. Custom TUI widgets, browser slash commands and uploads are not supported. `settled` means the run stopped and a local checkpoint was saved, not that every tool succeeded or external side effects were undone. Every command receipt also carries `actor`: `{ kind: "user" }` for browser or bearer-token commands and `{ kind: "thread", threadId, runnerId }` for delegations. Tower records it when it admits the command and never changes it afterwards; a runner cannot set or alter it. Receipts that only a runner remembers, such as those republished after restoring an older Tower backup, and receipts recorded before this version carry `actor: null`. Cloud sync is a separate status. Unknown commands are never automatically retried; inspect saved history before explicitly sending a new command.
 
-Run `npm run verify:phase0` for isolated regression tests, and `npm run verify:native` for the actual Tower + native pi + two WebSocket clients test (requires tmux). Both use isolated profiles and no paid LLM calls. Set `PI_NATIVE_PREVIEW=1` for the native test to keep its browser fixture open; it prints a local stop URL that cleans up its test data.
+Run `bun run verify:phase0` for isolated regression tests, and `bun run verify:native` for the actual Tower + native pi + two WebSocket clients test (requires tmux). Both use isolated profiles and no paid LLM calls. Set `PI_NATIVE_PREVIEW=1` for the native test to keep its browser fixture open; it prints a local stop URL that cleans up its test data.
 
-Run `npm run verify:ui` for the browser workflow checks. Install Chromium first with `npx playwright install chromium`; the test also needs the normal global `pi` installation. This optional suite runs separately from `npm run verify`.
+Run `bun run verify:ui` for the browser workflow checks. Install Chromium first with `bunx playwright install chromium`; the test also needs the normal global `pi` installation. This optional suite runs separately from `bun run verify`.
 
 ### Asynchronous thread collaboration
 
@@ -214,9 +214,9 @@ Tower migrates its SQLite schema to 5 at startup, preserving catalog metadata, s
 Reproduce the collaboration checks without real sessions or paid calls:
 
 ```sh
-npm run verify:collaboration  # public API gate, store/recovery/protocol, real pi and native TUIs
-npm run verify:phase0        # full regression in disposable HOME/profile/workspace
-node test/compat/collaboration-browser-fixture.mjs # local offline UI fixture; Ctrl-C to stop
+bun run verify:collaboration  # public API gate, store/recovery/protocol, real pi and native TUIs
+bun run verify:phase0        # full regression in disposable HOME/profile/workspace
+bun run test/compat/collaboration-browser-fixture.mjs # local offline UI fixture; Ctrl-C to stop
 ```
 
 The native test requires tmux and uses a private socket and separate temporary pi profiles. The real-pi tests use pi 0.85.1's scripted provider. They exercise parallel target barriers, FIFO admission, explicit reports, automatic results, `/reload`, `/new`, and restarting the original native thread. Protocol tests use fake runners for cross-host routing, conflicts, disconnection, receipt retry, Tower restart and backup restoration. Recovery tests reconstruct specific durable-write boundaries; they are not SIGKILL tests at every instruction. Physical multi-host networking and a deployed HQ are not part of these local checks. See the [collaboration specification and evidence](plans/3-done/env-meta-and-runner-collaboration.md).
@@ -242,7 +242,7 @@ Restore into the same deployment and then check SQLite before starting Tower. Ke
 ```sh
 docker compose stop tower
 docker compose run --rm --no-deps --user 0 -v "$PWD/backups:/backup" tower sh -c \
-  'tar -C /data -czf /backup/pre-restore-$(date +%s).tgz . && find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar -C /data -xzf /backup/pi-tower-data.tgz && node --input-type=module -e '\''import Database from "better-sqlite3"; import {createSnapshotStore} from "./src/managed/snapshots.mjs"; const db=new Database("/data/tower.sqlite",{readonly:true}); if(db.pragma("integrity_check",{simple:true})!=="ok") throw new Error("integrity_check failed"); const snapshots=createSnapshotStore(db); for(const row of db.prepare("SELECT thread_id FROM managed_snapshot_latest").all()) snapshots.latest(row.thread_id); db.close()'\'''
+  'tar -C /data -czf /backup/pre-restore-$(date +%s).tgz . && find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && tar -C /data -xzf /backup/pi-tower-data.tgz && bun -e '\''import {openDatabase,pragma} from "./src/managed/sqlite.mjs"; import {createSnapshotStore} from "./src/managed/snapshots.mjs"; const db=openDatabase("/data/tower.sqlite",{readonly:true}); if(pragma(db,"integrity_check")!=="ok") throw new Error("integrity_check failed"); const snapshots=createSnapshotStore(db); for(const row of db.prepare("SELECT thread_id FROM managed_snapshot_latest").all()) snapshots.latest(row.thread_id); db.close()'\'''
 docker compose start tower
 ```
 
@@ -250,4 +250,4 @@ Do not copy only `tower.sqlite` from a running Tower: committed data may still b
 
 On reconnect, the original runner reconciles receipts and cloud revision/hash before accepting work. It can republish a verified local superset after Tower rolls back to an older backup, using a fresh random generation. Divergent history fails closed. Threads created after that backup are absent from its catalog: the runner retains them locally and logs `thread_missing_from_catalog`, without recreating metadata or blocking other threads. Recover a newer Tower backup to make those threads available again. If both sides lost newer records, backups cannot prove or recover the missing side effects or receipts.
 
-With Docker already running and pi installed locally, run `node test/verify-docker.mjs` to build the product image and verify stopped-volume backup, restoration to a new volume, and continuation through the original runner. It uses isolated data and a local faux provider, then removes its test resources. This passed with Node 22.22.0 Alpine and pi 0.85.1; it does not test a live Cloudflare Tunnel. See [implementation evidence and remaining acceptance work](plans/2-open/cloud-threads-v1/progress.md); do not treat the current work as completed Cloud Threads v1.
+With Docker already running and pi installed locally, run `bun run test/verify-docker.mjs` to build the product image and verify stopped-volume backup, restoration to a new volume, and continuation through the original runner. It uses isolated data and a local faux provider, then removes its test resources. This passed with Bun 1.4.2 Alpine and pi 0.85.1; it does not test a live Cloudflare Tunnel. See [implementation evidence and remaining acceptance work](plans/2-open/cloud-threads-v1/progress.md); do not treat the current work as completed Cloud Threads v1.

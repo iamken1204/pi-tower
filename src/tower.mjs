@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S bun --no-env-file
 // pi-tower: relays RPC JSONL frames between clients and per-session pi processes on registered runners.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
@@ -258,10 +258,18 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		res.writeHead(404).end();
 	});
 
-	const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+	const wss = new WebSocketServer({ noServer: true });
 	const frameLimit = Number(process.env.PI_TOWER_MANAGED_FRAME_BYTES ?? 512 * 1024);
 	if (!Number.isSafeInteger(frameLimit) || frameLimit < 1) throw new Error("invalid_managed_frame_limit");
-	const browserWss = new WebSocketServer({ noServer: true, maxPayload: frameLimit });
+	// Bun's ws accepts maxPayload without enforcing it, so the limit applies here: an oversize frame
+	// closes its peer with 1009 and never reaches a route. Bun itself drops any frame over 16 MiB.
+	const limitFrames = (ws, limit) => {
+		const on = ws.on.bind(ws);
+		ws.on = (event, listener) => on(event, event !== "message" ? listener : (data, isBinary) => {
+			if (Buffer.byteLength(data) > limit) ws.close(1009, "frame too large");
+			else listener(data, isBinary);
+		});
+	};
 	const routes = { "/runner": handleControl, "/runner-session": handleSession, "/attach": handleAttach, ...managed?.routes };
 
 	server.on("upgrade", (req, socket, head) => {
@@ -274,9 +282,9 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			return;
 		}
 		const humanRoute = managedStream || url.pathname === "/managed/client";
-		const handler = humanRoute ? browserWss : wss;
-		handler.handleUpgrade(req, socket, head, (ws) => {
+		wss.handleUpgrade(req, socket, head, (ws) => {
 			ws.on("error", () => {}); // Protocol/frame errors close the peer, not the Tower process.
+			if (humanRoute) limitFrames(ws, frameLimit);
 			const admitted = bearerAuthorized(req) || (managedStream && uiSessionAuthorized(req) && sameOrigin(req));
 			const principal = admitted && humanRoute ? identify(req) : null;
 			if (humanRoute ? !principal : !admitted) {
@@ -292,7 +300,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	// Proxies (Cloudflare's edge among them) drop idle connections; a WebSocket peer that misses
 	// two pings is gone, while SSE comments keep browser streams open.
 	const heartbeat = setInterval(() => {
-		for (const ws of [...wss.clients, ...browserWss.clients]) {
+		for (const ws of wss.clients) {
 			if (ws.isAlive === false) {
 				ws.terminate();
 				continue;
@@ -344,8 +352,9 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 			connectedAt: prev?.connectedAt ?? new Date().toISOString(),
 			sessions: prev?.sessions ?? new Map(),
 		};
-		if (prev) prev.ws.terminate(); // new control wins; session pipes survive
+		// Registered first: terminate() may emit the old socket's close before it returns.
 		runners.set(id, runner);
+		if (prev) prev.ws.terminate(); // new control wins; session pipes survive
 		broadcastSnapshot();
 		ws.on("close", () => {
 			if (runners.get(id)?.ws !== ws) return; // replaced
@@ -374,11 +383,11 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		const prev = runner.sessions.get(name);
 		const p = pending.get(key);
 		const session = { ws, client: prev?.client ?? p?.client ?? null };
+		runner.sessions.set(name, session);
 		if (prev) {
 			clearTimeout(prev.idle);
 			prev.ws.terminate(); // new pipe wins, attached client kept
 		}
-		runner.sessions.set(name, session);
 		if (!session.client) armIdle(id, name, session);
 		if (p) {
 			pending.delete(key);
@@ -466,7 +475,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 	}
 
 	server.shutdown = async () => {
-		for (const ws of [...wss.clients, ...browserWss.clients]) ws.terminate();
+		for (const ws of [...wss.clients]) ws.terminate();
 		for (const res of uiStreams) res.end();
 		server.closeAllConnections();
 		await new Promise((resolve) => server.close(resolve));

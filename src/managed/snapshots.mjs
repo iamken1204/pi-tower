@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { backup } from "./sqlite.mjs";
 import { checkpoint, uuid } from "./storage.mjs";
 
 const MIB = 1024 * 1024;
@@ -81,7 +82,7 @@ export function createSnapshotStore(db, { maxSnapshotBytes = 64 * MIB, maxTotalB
 			if (rev.generationId === current.generation_id && rev.counter <= current.counter) throw failure("snapshot_counter_regressed");
 			if (rev.generationId !== current.generation_id && db.prepare("SELECT 1 FROM managed_snapshot_index WHERE thread_id=? AND generation_id=? LIMIT 1").get(envelope.threadId, rev.generationId)) throw failure("snapshot_generation_retired");
 			if (!current.blob) throw failure("latest_snapshot_expired", 500);
-			const old = JSON.parse(current.blob.toString("utf8"));
+			const old = JSON.parse(Buffer.from(current.blob).toString("utf8"));
 			if (createHash("sha256").update(current.blob).digest("hex") !== current.hash) throw failure("snapshot_corrupt", 500);
 			if (!sameJson(old.header, envelope.header) || envelope.entries.length < old.entries.length || !old.entries.every((entry, index) => sameJson(entry, envelope.entries[index]))) throw failure("snapshot_not_append_superset");
 		}
@@ -125,7 +126,7 @@ export function createSnapshotStore(db, { maxSnapshotBytes = 64 * MIB, maxTotalB
 			throw failure("snapshot_expired", 410, { latestRevision: newest ? { generationId: newest.generation_id, counter: newest.counter } : null });
 		}
 		if (createHash("sha256").update(row.blob).digest("hex") !== row.hash) throw failure("snapshot_corrupt", 500);
-		const envelope = JSON.parse(row.blob.toString("utf8"));
+		const envelope = JSON.parse(Buffer.from(row.blob).toString("utf8"));
 		const entries = envelope.entries.slice(cursor, cursor + limit);
 		return { revision: { generationId: row.generation_id, counter: row.counter }, hash: row.hash, leafId: envelope.leafId, entries, nextCursor: cursor + entries.length < envelope.entries.length ? cursor + entries.length : null };
 	}
@@ -139,5 +140,5 @@ export function createSnapshotStore(db, { maxSnapshotBytes = 64 * MIB, maxTotalB
 		const row = db.prepare("SELECT generation_id,counter,hash FROM managed_snapshot_latest WHERE thread_id=?").get(uuid(threadId));
 		return row ? { revision: { generationId: row.generation_id, counter: row.counter }, hash: row.hash } : null;
 	}
-	return { commit, latest, head, history, usage, backup: (path) => db.backup(path) };
+	return { commit, latest, head, history, usage, backup: (path) => backup(db, path) };
 }

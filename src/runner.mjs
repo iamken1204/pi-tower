@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S bun --no-env-file
 // pi-runner: registers with a pi-tower and runs one `pi --mode rpc` child per opened session, killed when the tower closes it.
 import { spawn } from "node:child_process";
 import { homedir, hostname } from "node:os";
@@ -82,7 +82,7 @@ const { hq, id, token, piArgs } = options;
 const managed = options.managed ? new ManagedRunner(options) : null;
 managed?.hostAll();
 managed?.connect({ hq, token });
-// { headers } is a Node (undici) WebSocket extension, not the WHATWG standard; fine since engines requires Node >= 22.
+// { headers } is a Bun WebSocket extension, not the WHATWG standard.
 const wsOpts = { headers: { authorization: `Bearer ${token}` } };
 
 const children = new Map(); // session name -> { child, buf, ws }

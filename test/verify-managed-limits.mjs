@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+import { openDatabase } from "../src/managed/sqlite.mjs";
 import { createManagedTower } from "../src/managed/tower.mjs";
 
 class Socket extends EventEmitter {
@@ -23,7 +23,7 @@ const threadId = randomUUID(), instanceId = randomUUID(), sessionId = randomUUID
 let tower, fixtureRunner;
 function open(options = {}) {
 	tower = createManagedTower(dir, { maxSnapshotBytes: 2048, maxTotalBytes: 4096, minFreeBytes: 1, maxUploads: 1, maxViewerBuffer: 1024, ...options });
-	const db = new Database(resolve(dir, "tower.sqlite"));
+	const db = openDatabase(resolve(dir, "tower.sqlite"));
 	db.prepare(`INSERT OR IGNORE INTO threads(threadId,createKey,runnerId,runnerInstanceId,title,createdAt,workspaceId,piSessionId,updatedAt,createTitle)
 		VALUES (?,?,?,?,?,?,?,?,?,?)`).run(threadId, randomUUID(), "fixture", instanceId, "limits", "2026-09-14", workspaceId, sessionId, "2026-09-14", "limits");
 	db.close();
@@ -66,7 +66,7 @@ try {
 	const normal = new Socket(); normal.bufferedAmount = 1024;
 	tower.routes["/managed/client"](normal, new URLSearchParams({ thread: threadId }));
 	assert.equal(normal.frames[0].type, "state");
-	const catalog = new Database(resolve(dir, "tower.sqlite"));
+	const catalog = openDatabase(resolve(dir, "tower.sqlite"));
 	const expected = [];
 	for (let i = 0; i < 23; i++) {
 		const id = randomUUID(), archived = i % 5 === 0;

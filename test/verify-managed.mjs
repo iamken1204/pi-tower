@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+import { backup, openDatabase, pragma } from "../src/managed/sqlite.mjs";
 import { createTower } from "../src/tower.mjs";
 import { checkpoint, durableWrite, readJson } from "../src/managed/storage.mjs";
 
@@ -229,9 +229,9 @@ try {
 	await until(async () => (await client.request("state")).sync === "synced", "second snapshot committed");
 	assert.deepEqual((await history(id)).entries, after.entries);
 	// Capture the real catalog, receipts and current WAL while Tower remains online.
-	const backupSource = new Database(resolve(towerDirectory, "tower.sqlite"));
+	const backupSource = openDatabase(resolve(towerDirectory, "tower.sqlite"));
 	const backupPath = resolve(temp, "consistent-backup.sqlite");
-	await backupSource.backup(backupPath);
+	backup(backupSource, backupPath);
 	const backedUpHead = await history(id);
 	backupSource.close();
 	const orphan = (await create(randomUUID(), "created after backup")).body;
@@ -250,8 +250,8 @@ try {
 	towerDirectory = resolve(temp, "restored-tower");
 	mkdirSync(towerDirectory);
 	cpSync(backupPath, resolve(towerDirectory, "tower.sqlite"));
-	const restoredDatabase = new Database(resolve(towerDirectory, "tower.sqlite"));
-	assert.equal(restoredDatabase.pragma("integrity_check", { simple: true }), "ok");
+	const restoredDatabase = openDatabase(resolve(towerDirectory, "tower.sqlite"));
+	assert.equal(pragma(restoredDatabase, "integrity_check"), "ok");
 	assert.equal(restoredDatabase.prepare("SELECT title FROM threads WHERE threadId=?").get(id).title, created.title);
 	assert.equal(JSON.parse(restoredDatabase.prepare("SELECT receipt FROM managed_commands WHERE commandId=?").get(firstCommand).receipt).status, "settled");
 	restoredDatabase.close();
@@ -291,7 +291,7 @@ try {
 	rmSync(record.sessionFile);
 	assert.equal((await restore({ ...committed, counter: committed.counter + 999 })).body.error, "restore_revision_changed");
 	assert.equal(existsSync(record.sessionFile), false);
-	const corruptDatabase = new Database(resolve(towerDirectory, "tower.sqlite"));
+	const corruptDatabase = openDatabase(resolve(towerDirectory, "tower.sqlite"));
 	const blobRow = corruptDatabase.prepare("SELECT blob FROM managed_snapshot_index WHERE thread_id=? AND generation_id=? AND counter=?").get(id, committed.generationId, committed.counter);
 	const changeBlob = corruptDatabase.prepare("UPDATE managed_snapshot_index SET blob=? WHERE thread_id=? AND generation_id=? AND counter=?");
 	changeBlob.run(Buffer.from("corrupt"), id, committed.generationId, committed.counter);

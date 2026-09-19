@@ -218,7 +218,6 @@ export async function runInteractive(options) {
 	runner.connect(options);
 	process.on("exit", () => {
 		try { current?.native?.save(); if (current) { current.record.awake = false; durableWrite(current.recordFile, current.record); } } catch { /* Recovery validates any interrupted append on next start. */ }
-		void guards;
 	});
 	await tui.run();
 }

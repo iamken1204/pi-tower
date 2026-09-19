@@ -1,15 +1,12 @@
-FROM node:22.22.0-alpine
+FROM oven/bun:1.4.2-alpine
 WORKDIR /app
-COPY package.json package-lock.json ./
-# Native SQLite falls back to a local build when no matching prebuild is available.
-RUN apk add --no-cache --virtual .build-deps python3 make g++
-RUN npm ci --omit=dev --omit=peer
-RUN apk del .build-deps
+# Tower needs nothing beyond Bun itself: SQLite and WebSockets are built in.
 COPY src/tower.mjs src/lib.mjs ./src/
-COPY src/managed/tower.mjs src/managed/storage.mjs src/managed/snapshots.mjs src/managed/journal.mjs src/managed/collaboration-store.mjs ./src/managed/
+COPY src/managed/tower.mjs src/managed/sqlite.mjs src/managed/storage.mjs src/managed/snapshots.mjs src/managed/journal.mjs src/managed/collaboration-store.mjs ./src/managed/
 COPY src/ui ./src/ui
-RUN mkdir /data && chown node:node /data
+RUN mkdir /data && chown bun:bun /data
 VOLUME ["/data"]
-USER node
+USER bun
 EXPOSE 9000
-CMD ["node", "src/tower.mjs"]
+# No .env autoloading: compose passes the environment explicitly.
+CMD ["bun", "--no-env-file", "src/tower.mjs"]
