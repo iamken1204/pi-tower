@@ -1,6 +1,6 @@
 # Cloud Threads 實作與驗證紀錄
 
-已實作本機原生 pi TUI 與網頁共用 thread，並完成下列回歸、容器與瀏覽器驗證。依據 [v1 規格開頭的互動模式修訂](specs/cloud-threads-v1.md) 與 [第 0 階段決策](cloud-threads-phase0.md)。未 push、部署或發布；未測範圍列在文末，不把實測環境外的行為算成通過。
+已實作本機原生 pi TUI 與網頁共用 thread，並完成下列回歸、容器與瀏覽器驗證。依據 [v1 規格開頭的互動模式修訂](spec.md) 與 [第 0 階段決策](phase0.md)。未 push、部署或發布；未測範圍列在文末，不把實測環境外的行為算成通過。
 
 ## 本機互動式 pi：交付方式與實測
 
@@ -14,13 +14,13 @@
 
 上述 probe 另保留作為 SDK 相容性證據。產品測試為 `npm run verify:native`，已在 Node 22.22.0／26.8.2、真實 pi 0.85.1 通過：本機與兩個 WebSocket client 共用 session、preflight 期間排隊、steering、停止清除佇列、三種跨端 dialog、拒絕第二次回答、editor 拒絕遠端回答、Tower 離線期間本機繼續、舊 epoch 失效、`/reload`、`/new`，以及 SIGKILL 後從不同啟動目錄還原同一 entries／leaf，再於原 cwd 續接。測試使用隔離 HOME／profile／workspace 與 faux provider，不讀取真實憑證或呼叫付費模型。
 
-`--managed-threads` 的背景 RPC 路徑保留，沒有原生 TUI，忙碌時不收新 prompt；網頁依 runtime capability 停用送出。這條相容路徑不提供本機互動體驗，新的入口必須使用 `--interactive`。
+`--managed-threads` 的背景 RPC 路徑保留，沒有原生 TUI，忙碌時不收新 prompt；網頁依 runtime capability 停用送出。這條相容路徑不提供本機互動體驗；要在本機互動就用 `pi-runner` 的預設模式，`--interactive` 仍可明確指定。
 
 Native 測試也驗證未啟動模型回合的 custom entry 會同步，以及切回較早的 assistant leaf 後，crash 重啟仍保留後面的完整分支。Tree、compaction 與 session info 事件立即保存；沒有事件的 extension append 每 5 秒檢查一次 checkpoint hash，內容未變就不重寫檔案。
 
 ## 持久化與還原契約
 
-Managed mode 明確啟用，legacy relay 保留原有使用方式。實測 pi 0.85.1、Node 22.22.0／26.8.2、better-sqlite3 13.0.3；只測過這個 pi 版本，不把它稱為最低支援版本。Tower 使用單一 SQLite，schema version 3、WAL、FULL、1250 ms busy timeout。沒有 S3。
+Managed mode 明確啟用，legacy relay 保留原有使用方式。實測 pi 0.85.1、Node 22.22.0／26.8.2、better-sqlite3 13.0.3；只測過這個 pi 版本，不把它稱為最低支援版本。Tower 使用單一 SQLite，schema version 5、WAL、FULL、1250 ms busy timeout。沒有 S3。
 
 Runner 用公開 SDK 開啟 session，再套用 `branch(leafId)` 或 `resetLeaf()`，驗證 session ID、完整 entries 與原 cwd 後接上公開 `runRpcMode`。沒有修改 pi 核心或使用私有 API。Header-only JSONL 讓空白 thread 也有持久身分；整份 registry／JSONL／checkpoint 先寫進暫存目錄，再以 rename 一起發布。建立時 crash 留下的 `.prepare-*` 不會成為 runtime，也不阻止已發布的 thread 重啟。
 
@@ -89,4 +89,4 @@ Tower 還原較舊備份時，原 runner 下載並驗證雲端 head，確認本�
 - A22 的 metadata／搜尋／封存已測；另以真實 SQLite 與 fake transport 驗證 23 筆同時間戳記、7 筆一頁的搜尋／runner 篩選，完整走完分頁，不重複、不遺漏並排除封存項目。尚未窮舉翻頁期間所有 metadata 更新組合。
 - 真實 provider 的重試／自動壓縮長流程、Windows／其他檔案系統與實體手機 Safari 尚未驗證。這些結果不能從 faux provider 或桌面窄視窗推論。
 
-產品範圍沒有新的待確認事項。部署、容量、停止後備份與最新快照還原限制見 [README](../README.md)。本機互動模式已可手動驗證；以上壓力測試與故障注入尚未涵蓋的組合不算驗收通過，不宣稱所有環境與故障時序皆已驗證。
+產品範圍沒有新的待確認事項。部署、容量、停止後備份與最新快照還原限制見 [README](../../../README.md)。本機互動模式已可手動驗證；以上壓力測試與故障注入尚未涵蓋的組合不算驗收通過，不宣稱所有環境與故障時序皆已驗證。

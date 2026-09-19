@@ -1,5 +1,7 @@
 # Cloud threads SQLite phase-0 probe
 
+Status: historical record from 2026-09-14. `better-sqlite3@13.0.3` has since become a product dependency in `package.json`. The probe scripts below are still in `test/compat/`.
+
 ## Decision
 
 Use exactly `better-sqlite3@13.0.3` as the phase-0 candidate. Its published

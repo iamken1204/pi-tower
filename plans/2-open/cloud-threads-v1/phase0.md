@@ -1,8 +1,10 @@
 # Cloud Threads v1 第 0 階段相容性紀錄
 
+狀態：2026-09-14 的歷史紀錄，現況見[實作與驗證紀錄](progress.md)。之後的變化：`better-sqlite3@13.0.3` 已是產品依賴；複合 revision 與連線 epoch 已實作；完整產品 image 已由 `test/verify-docker.mjs` 驗證；同主機的 writer 排除改用作業系統持有的 SQLite 鎖，沒有採用 supervisor。
+
 第 0 階段相容性調查完成，可依下列契約進入第 1 階段；本輪停在交付，不開始實作 managed runtime。pi 的公開介面已能保存完整樹並精確還原 leaf，SQLite 已通過 Alpine 安裝與跨程序持久化測試。跨主機複製 runner 目錄後繼續使用已確定不支援。同主機的 writer 排他保護仍是後續開放寫入的必要條件，不是現有功能。
 
-本紀錄依據 [規格第 13 節](specs/cloud-threads-v1.md#13-實作分期與交接要求)，只補上測試結果與技術提案，不取代規格。初次測試交付未修改規格；後續依使用者確認，補上跨主機複製不支援的範圍。程式碼基準仍為 [21b378e](https://github.com/iamken1204/pi-tower/commit/21b378e2c3952a2999118ff7b6393ee99e44da2d)，pi-tower 0.3.0。沒有修改 pi 核心；legacy 僅修正本輪重現的 UTF-8 chunk 解碼錯誤，呼叫方式不變。
+本紀錄依據 [規格第 13 節](spec.md#13-實作分期與交接要求)，只補上測試結果與技術提案，不取代規格。初次測試交付未修改規格；後續依使用者確認，補上跨主機複製不支援的範圍。程式碼基準仍為 [21b378e](https://github.com/iamken1204/pi-tower/commit/21b378e2c3952a2999118ff7b6393ee99e44da2d)，pi-tower 0.3.0。沒有修改 pi 核心；legacy 僅修正本輪重現的 UTF-8 chunk 解碼錯誤，呼叫方式不變。
 
 ## 實測版本與重現方式
 
@@ -31,7 +33,7 @@ node test/compat/verify-crash.mjs
 
 測試預設從 `npm root -g` 尋找已安裝的 `@earendil-works/pi-coding-agent`；可用 `PI_COMPAT_PACKAGE=/absolute/package/path` 指定套件目錄。讀取套件公開 root entry，不使用未匯出的 session 方法。測試 extension 為避開 pi 的相容層別名，直接載入 pi-ai 的公開 root entry 檔案；需要 npm 安裝的完整套件，不能只給獨立 binary。
 
-測試其他 Node 版本時，用官方 Node archive 的 `bin/node` 執行 `test/compat/verify-isolated.mjs`，並明確設定 `PI_COMPAT_PACKAGE`。子程序使用同一個 `process.execPath`；完整回歸也將該 binary 目錄放在 PATH 最前面。macOS arm64 的測試 archive 為 `https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-arm64.tar.gz`。SQLite／Docker 指令見 [SQLite probe](cloud-threads-sqlite-probe.md)。SQLite 測試會下載套件，因此不在一般 `verify` 裡自動執行。
+測試其他 Node 版本時，用官方 Node archive 的 `bin/node` 執行 `test/compat/verify-isolated.mjs`，並明確設定 `PI_COMPAT_PACKAGE`。子程序使用同一個 `process.execPath`；完整回歸也將該 binary 目錄放在 PATH 最前面。macOS arm64 的測試 archive 為 `https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-arm64.tar.gz`。SQLite／Docker 指令見 [SQLite probe](sqlite-probe.md)。SQLite 測試會下載套件，因此不在一般 `verify` 裡自動執行。
 
 ## 真實 pi 與 fake 的證據界線
 
@@ -49,7 +51,7 @@ node test/compat/verify-crash.mjs
 - 真實 stdin 逐 byte 傳送中文字、emoji、U+2028／U+2029，CRLF 輸入保持完整；測試 reader 使用 streaming UTF-8 decoder、只以 LF 分隔。
 - `select`、`confirm`、`input`、`editor` 的 pending ID 可由替代邏輯 client 回覆。Pi 忽略無效 ID，沒有 browser epoch 檢查。這只驗證接手所需的 RPC 能力，尚未實作兩個瀏覽器的 ownership／pending-dialog 保存與拒絕回覆。
 
-`verify-crash.mjs` 使用真正的 Tower 與 runner。Fake pi 在 wrapper SIGKILL 後仍存活，明確重現現有 wrapper 缺乏 child 退出保證。真實 pi 0.85.1 在 idle 與 pending dialog 測試中，750 ms 後皆已退出。這不能推論正在執行的工具或脫離 process group 的後代也一定退出。[Crash probe](cloud-threads-crash-probe.md) 記錄 supervisor／reap／無法確認就拒絕啟動的提案。
+`verify-crash.mjs` 使用真正的 Tower 與 runner。Fake pi 在 wrapper SIGKILL 後仍存活，明確重現現有 wrapper 缺乏 child 退出保證。真實 pi 0.85.1 在 idle 與 pending dialog 測試中，750 ms 後皆已退出。這不能推論正在執行的工具或脫離 process group 的後代也一定退出。[Crash probe](crash-probe.md) 記錄 supervisor／reap／無法確認就拒絕啟動的提案。
 
 同一個 fake 逐 byte 輸出時，原本 runner 會毀損 UTF-8。本輪已在 stdout 設定 streaming UTF-8 decoder，測試改為檢查中文字、emoji 與 Unicode 分隔字元逐字相等，且仍只有一個 LF frame。修正後在 Node 22.22.0、26.8.2 均通過完整隔離回歸。
 

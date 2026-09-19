@@ -2,7 +2,7 @@
 
 狀態：已實作於 main（2026-09-16）。Tower 端以 connection／host 模型實作：runner 連線以 connection id 為 key，每個 thread 記錄承載它的連線，協作請求與事件只接受該連線。公開 API、測試範圍與限制見第 11 節；本機驗證不代表已部署或完成實體跨主機驗收。
 
-本文延續 [Cloud Threads v1](../../docs/specs/cloud-threads-v1.md)，尤其是文件開頭的互動模式修訂；不沿用已被取代的操作權交接流程。
+本文延續 [Cloud Threads v1](../2-open/cloud-threads-v1/spec.md)，尤其是文件開頭的互動模式修訂；不沿用已被取代的操作權交接流程。
 
 調查基準：2026-09-15 的本機 `main`，已含首頁 managed runner 顯示修正。現有套件宣告 Node ≥22.22.0、better-sqlite3 13.0.3；既有 pi 驗證版本為 0.85.1，不等於最低支援版本。本功能須另驗證所用公開 API。
 
@@ -208,7 +208,7 @@ Fake pi 用於協定與故障測試；真實 pi 使用無付費 LLM 的可控 pr
 | `test/compat/verify-collaboration-api.mjs` | 第 9 節 A。真實 pi、可控 provider，驗證工具執行、task 記錄、閒置／忙碌自動收件、去重、reload、new、resume 與 session 重開。 |
 | `test/verify-collaboration.mjs` | 三個真實 pi 程序，在不同 cwd 同時停於 B、C 的測試屏障；A 仍可處理輸入，C→B 排隊且執行順序固定。驗證不同 task 的明確摘要、普通回答維持 unknown、自動收件與空白名稱同步。 |
 | `test/verify-native-collaboration.mjs` | 兩個真實原生 TUI。模型實際呼叫委派／回報工具，A 在 B 忙碌時繼續輸入；驗證 FIFO、兩端持久訊息、reload、本機改名、new 隔離，以及退出後重啟原 thread 補收結果。 |
-| `test/verify-collaboration-protocol.mjs` | 真實 Tower 搭配 fake runner。驗證跨 project／cwd／hostname 雙向查詢與委派、精確篩選／分頁、來源綁定、衝突與偽造回報、通知 ACK 遺失、不可用／同步失敗／封存／離線拒絕、Tower 重啟、備份復原與 schema 3→4。 |
+| `test/verify-collaboration-protocol.mjs` | 真實 Tower 搭配 fake runner。驗證跨 project／cwd／hostname 雙向查詢與委派、精確篩選／分頁、來源綁定、衝突與偽造回報、通知 ACK 遺失、不可用／同步失敗／封存／離線拒絕、Tower 重啟、備份復原與 schema 3→5。 |
 | `test/verify-collaboration-store.mjs`、`test/verify-collaboration-recovery.mjs` | 任務／回報交易、大小限制、不可變結果。以持久檔案與 SQLite 備份重建故障邊界：task 建立前的舊備份、report 提交前的舊備份、來源通知 intent 已寫入但無 session 記錄、session 記錄已寫入但 ACK 遺失、runner report outbox 重開，以及 ACK 不覆蓋較新的任務結束證據。另驗證離線改名衝突與明確解決。 |
 | 既有 `verify-managed`、journal、snapshot crash、native 測試 | 沿用的命令 journal 在送出前後與受理／settled 邊界的 SIGKILL、snapshot 交易內六個 SIGKILL 邊界、舊 epoch 拒絕、原 cwd／單 writer、WebSocket 與原生 TUI 共同輸入、停止及 dialog。 |
 | 瀏覽器與 `assets/collaboration-{desktop,mobile}.png` | 使用 `threads.html` 與 `test/compat/collaboration-browser-fixture.mjs` 的離線資料，在 728px 與 350px 兩種視窗寬度檢查三張協作卡片、收件方向、離線待送達與已確認收件的差異、普通回答獨立呈現、Host／Delegation 狀態格、HTML 以文字顯示及無水平溢出。2026-09-16 重拍，兩張截圖均已檢視；1200px 以上的七欄狀態格只有 CSS 審閱，沒有截圖。 |
@@ -231,6 +231,8 @@ node test/compat/collaboration-browser-fixture.mjs
 
 前兩項建立暫存 HOME、pi profile 與 workspace，不讀寫真實 session 或憑證；最後一項提供唯讀 UI 測試資料並印出本機 URL。實測 Node 版本為 22.22.0 與 26.8.2，pi 固定為 0.85.1，不宣稱支援更早的 pi 版本。
 
-2026-09-16 在 Node 26.8.2、pi 0.85.1 的本機執行：`verify-collaboration-api`、`verify-collaboration-store`、`verify-collaboration-recovery`、`verify-collaboration-protocol`、`verify-collaboration` 全部通過；既有 `verify` 鏈中除 `verify:native` 外的每一項也通過。`verify-native-collaboration` 與 `verify-native` 需要 tmux，本機沒有安裝，這兩項沒有執行；原生 TUI 的協作路徑目前只有程式碼審閱，沒有本機證據。沒有在 Node 22 上重跑。
+2026-09-16 在 Node 26.8.2、pi 0.85.1 的本機執行：`verify-collaboration-api`、`verify-collaboration-store`、`verify-collaboration-recovery`、`verify-collaboration-protocol`、`verify-collaboration` 全部通過；既有 `verify` 鏈中除 `verify:native` 外的每一項也通過。`verify-native-collaboration` 與 `verify-native` 需要 tmux，本機沒有安裝，這兩項當時沒有執行。沒有在 Node 22 上重跑。
+
+2026-09-19 裝好 tmux 3.7c 後，在 Node 26.9.0、pi 0.85.1 的本機補跑 `node test/verify-native.mjs` 與 `node test/verify-native-collaboration.mjs`，兩項都通過。原生 TUI 的協作路徑至此有本機證據；Node 22 仍未重跑。
 
 先前實作時曾重現 provider 非同步註冊後，可用模型快照尚未就緒而選到 `unknown`；host 在建立 session 前呼叫公開的 `modelRuntime.getAvailable()` 等待可用性查詢。這個修正已獨立成一個 commit 先進 main，也是 `verify-managed` 偶發逾時的原因。

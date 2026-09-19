@@ -1,5 +1,7 @@
 # Phase 0 runner crash probe
 
+Status: historical record from 2026-09-14; see [progress](progress.md) for the current state. `runner.mjs` now lives at `src/runner.mjs`. The supervisor proposed below was not adopted. Managed runners instead hold OS-backed SQLite locks (`writer.sqlite` for a headless wrapper's data directory, `runtime.sqlite` for each thread) and refuse to start while a previous child's exit is unconfirmed.
+
 ## Result
 
 `test/compat/verify-crash.mjs` runs the current `runner.mjs` against an in-process Tower and a uniquely scoped fake `pi`. Each case gets separate temporary `HOME`, cwd, and `XDG_DATA_HOME` directories. The probe opens a real Tower session, records the spawned child PID, sends input only in the busy case, and sends `SIGKILL` only to the wrapper. The fake intentionally remains alive after stdin EOF so the test can distinguish wrapper cleanup from incidental child exit.
@@ -29,4 +31,4 @@ If the supervisor is unavailable, its durable state is inconsistent, or prior-ch
 
 A persisted PID is not proof: PIDs are reused, ownership can change between checks, and `kill(pid, 0)` proves neither identity nor that descendants have stopped. A PID file may be diagnostic metadata only. The exclusion proof must come from ownership of the live child handle plus reap notification, combined with the exclusive thread lease. On Linux, a parent-death signal may reduce orphaning but is not portable and does not replace exclusion/reaping. Descendants can escape a process group; group emptiness alone must not authorize restarting a writer if containment is uncertain. Use OS-managed containment where available, otherwise require operator recovery. No proof-of-concept lock was added because a wrapper-held file lock is released by `SIGKILL` while its orphan remains; by itself it would incorrectly authorize a second writer.
 
-This proposal addresses same-host lifecycle only. The user has excluded copying a runner directory to another host and continuing there, even when the original host is stopped; see [spec sections 2 and 8](specs/cloud-threads-v1.md). Offline work remains supported. Cross-host clone exclusion is not required, but same-host crash recovery must still prevent a second writer. The supervisor remains an engineering proposal, not implemented protection.
+This proposal addresses same-host lifecycle only. The user has excluded copying a runner directory to another host and continuing there, even when the original host is stopped; see [spec sections 2 and 8](spec.md). Offline work remains supported. Cross-host clone exclusion is not required, but same-host crash recovery must still prevent a second writer. The supervisor remains an engineering proposal, not implemented protection.

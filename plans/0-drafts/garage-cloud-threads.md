@@ -2,7 +2,7 @@
 
 ## Status: deferred beyond v1
 
-The subsequent product decision is to keep all Tower persistent application data, including snapshot BLOBs, in one SQLite database for v1. The [handoff spec](../specs/cloud-threads-v1.md) is authoritative. No S3 integration or multi-backend framework is required for this release.
+The subsequent product decision is to keep all Tower persistent application data, including snapshot BLOBs, in one SQLite database for v1. The [handoff spec](../2-open/cloud-threads-v1/spec.md) is authoritative. No S3 integration or multi-backend framework is required for this release.
 
 Garage remains a suitable candidate for a later immutable snapshot backend. In that design, keep the thread catalog, latest-revision pointers, command receipts, and ownership coordination in Tower; keep active pi session files and the runner journal on the runner's local filesystem.
 
