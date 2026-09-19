@@ -10,8 +10,7 @@
 	"type": "module",
 	"bin": {
 		"pi-tower": "./src/tower.mjs",
-		"pi-runner": "./src/runner.mjs",
-		"pi-task": "./src/task.mjs"
+		"pi-runner": "./src/runner.mjs"
 	},
 	"files": [
 		"src",

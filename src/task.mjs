@@ -1,13 +1,12 @@
-#!/usr/bin/env node
-// pi-task: dispatch a prompt to a remote pi runner via a tower; final answer on stdout.
+// pi-runner task: dispatch a prompt to a remote pi runner via a tower; final answer on stdout.
 import { formatRunners, listRunners, loadToken, runTask } from "./lib.mjs";
 
-const usage = `usage: pi-task [--tower <ws(s)://url>] [--token <t> | --token-file <path>] [--session <name>] [--fresh] <runner-id> "<prompt>"
-       pi-task --list
+const usage = `usage: pi-runner task [--tower <ws(s)://url>] [--token <t> | --token-file <path>] [--session <name>] [--fresh] <runner-id> "<prompt>"
+       pi-runner task --list
 env fallbacks: PI_TOWER_URL, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE; default token file ~/.pi-tower/token
 quickstart:
-  pi-task --list                    # who's online
-  pi-task win-test-1 "run the failing job and report the error"
+  pi-runner task --list                    # who's online
+  pi-runner task win-test-1 "run the failing job and report the error"
 --session: same name shares context across tasks, different names run in parallel (default: main)
 progress streams to stderr; stdout carries only the final answer`;
 

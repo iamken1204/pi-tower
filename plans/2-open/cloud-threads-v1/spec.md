@@ -46,12 +46,12 @@
 - 固定 runner 上的本機持久化、程序重啟還原、斷線重連與同步補傳。
 - 同一 thread 可有多個唯讀檢視者，但只有一個操作裝置。
 - 操作權交接、重複命令辨識，以及未能確認命令是否執行時的明確提示。
-- 保留既有 `pi-task` 與 raw RPC relay 的既有使用方式。
+- 保留既有 `pi-runner task` 與 raw RPC relay 的既有使用方式。
 - 文件化部署、備份、復原步驟與資料耐久性界線。
 
 ### v1 不做
 
-- 將本機互動式 pi 的所有 sessions 自動上傳；既有 `pi-task` 呼叫者的本機對話也不會自動合併。
+- 將本機互動式 pi 的所有 sessions 自動上傳；既有 `pi-runner task` 呼叫者的本機對話也不會自動合併。
 - 在另一台 runner 執行同一 thread、runner 自動容錯移轉、repo／未提交修改／憑證同步。
 - 多人帳號、團隊 ACL、公開分享連結、即時共同編輯或多寫入者合併。
 - 瀏覽器版 `/tree`、fork／clone 操作、任意 pi slash command、完整 TUI 擴充元件重現。
@@ -390,7 +390,7 @@ Pi 程序 crash 後不重建舊的 blocking dialog，而是把 run 標成 interr
 ### Legacy 保持原樣
 
 - 原有 `/runners`、`/attach`、`/runner-session` 的 wire contract 不變。
-- `pi-task --session <name>` 仍使用 legacy live-session 語意；不悄悄變成雲端同步，也不改 `--fresh` 的意義。
+- `pi-runner task --session <name>` 仍使用 legacy live-session 語意；不悄悄變成雲端同步，也不改 `--fresh` 的意義。
 - Legacy runner 的 `--no-session` 繼續可用。Managed mode 必須明確啟用，且拒絕會破壞持久身分的 `--no-session`、共用 `--session`、`--continue` 等衝突參數。
 - 不自動匯入或重新命名既有 legacy sessions；日後若需要，另寫遷移規格。
 

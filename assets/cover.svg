@@ -38,7 +38,7 @@
       <circle cx="110" cy="274" r="5" fill="#febc2e"/>
       <circle cx="128" cy="274" r="5" fill="#28c840"/>
       <g font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="13">
-        <text x="90" y="308" fill="#d7e3f4">$ <tspan fill="#f0a63b">pi-task</tspan> win-test-1 <tspan fill="#8fd18a">"debug the failing job"</tspan></text>
+        <text x="90" y="308" fill="#d7e3f4">$ <tspan fill="#f0a63b">pi-runner task</tspan> win-test-1 <tspan fill="#8fd18a">"debug the failing job"</tspan></text>
         <text x="90" y="334" fill="#6f81a3">→ a full pi agent answers from that machine</text>
         <rect x="90" y="346" width="8" height="14" fill="#d7e3f4">
           <animate attributeName="opacity" values="1;0;1" dur="1.4s" repeatCount="indefinite"/>

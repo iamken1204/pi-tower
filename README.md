@@ -6,10 +6,10 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ```
 ┌────────────────────── dispatcher (anywhere) ─────────────────────────────────────┐
-│  process: pi-task (task.mjs), run by a person or any agent with a shell          │
+│  process: pi-runner task, run by a person or any agent with a shell              │
 │  ┌────────────────────────────────────────────────────────────┐                  │
-│  │  pi-task --list                                            │                  │
-│  │  pi-task win-test-1 "<prompt>"                             │                  │
+│  │  pi-runner task --list                                     │                  │
+│  │  pi-runner task win-test-1 "<prompt>"                      │                  │
 │  │  └─ final answer on stdout                                 │                  │
 │  │       attach ─────── wss ────────────────────────────────────────┐            │
 │  └────────────────────────────────────────────────────────────┘     │            │
@@ -41,7 +41,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
-Tower and the runner require Bun 1.4.2 or newer; `pi-task` also runs on Node. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
+Tower and the runner require Bun 1.4.2 or newer. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
 
 Three roles, each runnable on any machine (even all three on one box). The runner brings its own pi.
 
@@ -74,23 +74,23 @@ bunx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/t
 
 A checkout can also compile the runner, pi 0.85.1 included, into one executable that needs neither Bun, Node nor a pi installation on the target machine: `bun run build:runner` writes `dist/pi-runner` (`--target bun-linux-x64` and the other Bun targets cross-compile). It ignores `.env` and `bunfig.toml` in the directory it starts from. pi's image-resizing WebAssembly module and native clipboard addon are not bundled.
 
-The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
+Tower, the runner and `pi-runner task` accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
 **Dispatch side** (wherever tasks come from)
 
-`pi-task` sends a prompt to a runner's legacy relay session and prints the final answer; see [pi-task CLI](#pi-task-cli). Managed and native interactive threads use the `thread_*` tools described under [Asynchronous thread collaboration](#asynchronous-thread-collaboration) below.
+`pi-runner task` sends a prompt to a runner's legacy relay session and prints the final answer; see [pi-runner task](#pi-runner-task). Managed and native interactive threads use the `thread_*` tools described under [Asynchronous thread collaboration](#asynchronous-thread-collaboration) below.
 
-## pi-task CLI
+## pi-runner task
 
-For legacy relay sessions, `pi-task` lets an agent (or human) dispatch with one shell command. It does not address managed or native interactive threads.
+For legacy relay sessions, `pi-runner task` lets an agent (or human) dispatch with one shell command. It does not address managed or native interactive threads.
 
 ```sh
 export PI_TOWER_URL=wss://hq.example.com PI_TOWER_TOKEN=<shared-token>
-pi-task --list                    # who's online
-pi-task win-test-1 "run the failing job and report the error"
+pi-runner task --list                    # who's online
+pi-runner task win-test-1 "run the failing job and report the error"
 ```
 
-stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; progress streams to stderr only in an interactive terminal, keeping piped output clean for agent callers. `--session <name>` picks the session (see below); `--fresh` resets the session's conversation first; Ctrl-C forwards an abort to the runner.
+stdout carries only the final answer, so `$(pi-runner task ...)` captures cleanly; progress streams to stderr only in an interactive terminal, keeping piped output clean for agent callers. `--session <name>` picks the session (see below); `--fresh` resets the session's conversation first; Ctrl-C forwards an abort to the runner.
 
 ## Sessions
 
@@ -99,7 +99,7 @@ Each runner runs one `pi --mode rpc` process per session, so different sessions 
 Managed and native interactive threads load the bundled `remote-runner` skill automatically. For any other agent, add a line to the project's AGENTS.md:
 
 ```md
-Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL and PI_TOWER_TOKEN or PI_TOWER_TOKEN_FILE).
+Remote runner tasks: `pi-runner task <runner-id> "<prompt>"`; list runners: `pi-runner task --list` (env: PI_TOWER_URL and PI_TOWER_TOKEN or PI_TOWER_TOKEN_FILE).
 ```
 
 ## Wire contract
@@ -136,7 +136,7 @@ Detaching a client leaves its session pipe idle on the tower, so a later attach 
 
 Single shared token, sent as an Authorization header on every upgrade and HTTP request, so it stays out of URLs and access logs. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
 
-The legacy relay (`/runner`, `/runner-session`, `/attach` and `pi-task`) is a pure pipe: Tower forwards frames without reading them, records nothing, and consults no policy beyond the token. The only trace of a relayed task is the transcript a runner keeps when started without `--no-session`. Deployments that need per-person permissions or an audit trail use Cloud Threads, where every command carries an actor and passes the policy; the legacy relay is outside that contract.
+The legacy relay (`/runner`, `/runner-session`, `/attach` and `pi-runner task`) is a pure pipe: Tower forwards frames without reading them, records nothing, and consults no policy beyond the token. The only trace of a relayed task is the transcript a runner keeps when started without `--no-session`. Deployments that need per-person permissions or an audit trail use Cloud Threads, where every command carries an actor and passes the policy; the legacy relay is outside that contract.
 
 ## Verify
 
@@ -185,7 +185,7 @@ Run `bun run verify:ui` for the browser workflow checks. Install Chromium first 
 
 Managed pi exposes `thread_list`, `thread_delegate`, `thread_tasks`, and `thread_report`. Discovery covers connected threads across **all projects and hosts in the same HQ**. Optional project, hostname and runner filters match complete values. Choose a thread ID after checking the directory and host; duplicate project names do not identify a unique checkout. Each thread retains one writer. Delegations queue as follow-ups, and the sender can keep working while the target runs. No file isolation, repo synchronization or cross-HQ routing is provided.
 
-Native interactive threads expose the same tools. They reuse the Runner's authenticated Tower connection, including `--hq` and `--token-file`/`--token`; the model does not need `PI_TOWER_URL` or `PI_TOWER_TOKEN`. Project names such as `pi` and `fx` can belong to the same Runner ID. Use `thread_list` to select by project, cwd and thread ID, and ask the user only when the candidates remain ambiguous. `runner_list`, `runner_task` and `pi-task` remain available for ordinary pi's legacy relay mode.
+Native interactive threads expose the same tools. They reuse the Runner's authenticated Tower connection, including `--hq` and `--token-file`/`--token`; the model does not need `PI_TOWER_URL` or `PI_TOWER_TOKEN`. Project names such as `pi` and `fx` can belong to the same Runner ID. Use `thread_list` to select by project, cwd and thread ID, and ask the user only when the candidates remain ambiguous. `pi-runner task` remains available for the legacy relay.
 
 Both managed hosts load the `remote-runner` skill bundled beside their own runtime, replacing any older installed copy of that skill in the session's resource catalog. Their system prompt also directs collaboration through the thread tools. To try a local fix, start `node /absolute/path/to/pi-tower/src/runner.mjs` with the usual Runner flags. For ordinary pi, replace `npm:pi-tower` in `~/.pi/agent/settings.json`'s `packages` with that checkout's absolute path to load its extension and skill. Restart existing Runner processes after runtime changes, resuming with `--thread <UUID>` (or `-c` in the original cwd); `/reload` refreshes resources but does not replace already imported Runner modules.
 
