@@ -90,11 +90,11 @@ Then start pi with the tower flags and prompt "use runner_task on win-test-1 to 
 pi --tower wss://hq.example.com --tower-token <shared-token>
 ```
 
-Providers with a direct API key see the extension tools natively. Providers that run their agent loop server-side (and never expose extension tools) get the `remote-runner` skill instead, which teaches the model the `pi-task` CLI below.
+In ordinary pi, providers with a direct API key see the relay extension tools natively. Providers that run their agent loop server-side (and never expose extension tools) can use the skill's legacy `pi-task` fallback. Managed and native interactive threads use the `thread_*` tools described under [Asynchronous thread collaboration](#asynchronous-thread-collaboration) below.
 
 ## pi-task CLI
 
-Some providers run their agent loop server-side and never expose extension-registered tools to the model. `pi-task` is the provider-agnostic fallback: any agent (or human) dispatches with one shell command instead of the extension tools.
+Some providers run their agent loop server-side and never expose extension-registered tools to the model. For legacy relay sessions, `pi-task` lets an agent (or human) dispatch with one shell command. It does not address managed or native interactive threads.
 
 ```sh
 export PI_TOWER_URL=wss://hq.example.com PI_TOWER_TOKEN=<shared-token>
@@ -196,6 +196,10 @@ Run `npm run verify:ui` for the browser workflow checks. Install Chromium first 
 ### Asynchronous thread collaboration
 
 Managed pi exposes `thread_list`, `thread_delegate`, `thread_tasks`, and `thread_report`. Discovery covers connected threads across **all projects and hosts in the same HQ**. Optional project, hostname and runner filters match complete values. Choose a thread ID after checking the directory and host; duplicate project names do not identify a unique checkout. Each thread retains one writer. Delegations queue as follow-ups, and the sender can keep working while the target runs. No file isolation, repo synchronization or cross-HQ routing is provided.
+
+Native interactive threads expose the same tools. They reuse the Runner's authenticated Tower connection, including `--hq` and `--token-file`/`--token`; the model does not need `PI_TOWER_URL` or `PI_TOWER_TOKEN`. Project names such as `pi` and `fx` can belong to the same Runner ID. Use `thread_list` to select by project, cwd and thread ID, and ask the user only when the candidates remain ambiguous. `runner_list`, `runner_task` and `pi-task` remain available for ordinary pi's legacy relay mode.
+
+Both managed hosts load the `remote-runner` skill bundled beside their own runtime, replacing any older installed copy of that skill in the session's resource catalog. Their system prompt also directs collaboration through the thread tools. To try a local fix, start `node /absolute/path/to/pi-tower/runner.mjs` with the usual Runner flags. For ordinary pi, replace `npm:pi-tower` in `~/.pi/agent/settings.json`'s `packages` with that checkout's absolute path to load its extension and skill. Restart existing Runner processes after runtime changes, resuming with `--thread <UUID>` (or `-c` in the original cwd); `/reload` refreshes resources but does not replace already imported Runner modules.
 
 Generate a UUID `requestId` once per delegation and reuse it for retries. Admission waits at most 10 seconds; a timeout means unknown, not unexecuted. Query `thread_tasks` with that request ID rather than submitting a new one. Targets must use `thread_report` with the task ID and a `completed` or `failed` summary. An ordinary assistant answer never completes a task. The first durable report is immutable; its outcome is the agent's claim, not independent verification.
 

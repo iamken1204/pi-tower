@@ -5,7 +5,7 @@ import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./
 import { holdWriterLock } from "./managed-lock.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
+import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
 
 const [packageDir, recordFile] = process.argv.slice(2);
 const writerGuard = holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
@@ -39,7 +39,7 @@ function callRunner(operation, input) {
 	});
 }
 const runtime = await api.createAgentSessionRuntime(async (options) => {
-	const services = await api.createAgentSessionServices({ ...options, resourceLoaderOptions: { extensionFactories: [(pi) => {
+	const services = await api.createAgentSessionServices({ ...options, resourceLoaderOptions: { skillsOverride: (base) => collaborationSkills(api, base), extensionFactories: [(pi) => {
 		registerCollaborationTools(pi, callRunner);
 		pi.on("session_info_changed", (_, ctx) => process.send?.({ type: "session_name", name: ctx.sessionManager.getSessionName() ?? "" }));
 	}] } });

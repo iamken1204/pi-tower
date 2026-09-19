@@ -7,7 +7,7 @@ import { createInterface } from "node:readline/promises";
 import { ManagedRunner } from "./managed-runner.mjs";
 import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
 import { holdWriterLock } from "./managed-lock.mjs";
-import { registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
+import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
 
 export async function runInteractive(options) {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("interactive_requires_terminal");
@@ -194,7 +194,7 @@ export async function runInteractive(options) {
 		entry.record.localName ??= opts.sessionManager.getSessionName() ?? "";
 		durableWrite(entry.recordFile, entry.record);
 		let session;
-		const services = await api.createAgentSessionServices({ ...opts, resourceLoaderOptions: { extensionFactories: [(pi) => {
+		const services = await api.createAgentSessionServices({ ...opts, resourceLoaderOptions: { skillsOverride: (base) => collaborationSkills(api, base), extensionFactories: [(pi) => {
 			registerCollaborationTools(pi, (operation, input) => runner.collaborationTool(entry, operation, input));
 			pi.on("session_start", () => { queueMicrotask(() => attach(session, entry)); });
 			pi.on("session_info_changed", (_, ctx) => runner.observeName(entry, ctx.sessionManager.getSessionName() ?? ""));

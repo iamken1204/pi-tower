@@ -2,9 +2,18 @@
 import { COLLABORATION_TEXT_BYTES, COLLABORATION_METADATA_BYTES, COLLABORATION_PAGE_MAX } from "./managed-collaboration-store.mjs";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { durableWrite, uuid } from "./managed-storage.mjs";
 
+// Keep the host's skill paired with its tools even when pi has an older npm copy.
+export function collaborationSkills(api, base) {
+	const bundled = api.loadSkillsFromDir({ dir: fileURLToPath(new URL("./skills/remote-runner", import.meta.url)), source: "pi-tower" });
+	return { skills: [...base.skills.filter((skill) => skill.name !== "remote-runner"), ...bundled.skills],
+		diagnostics: [...base.diagnostics, ...bundled.diagnostics] };
+}
+
 export function registerCollaborationTools(pi, call) {
+	pi.on("before_agent_start", (event) => ({ systemPrompt: `${event.systemPrompt}\n\nTower thread collaboration: Use thread_list, thread_delegate, thread_tasks and thread_report for work in other threads or projects. These tools reuse this Runner's Tower connection; do not ask for PI_TOWER_URL or PI_TOWER_TOKEN or use runner_list, runner_task, pi-task or task.mjs for thread collaboration, even if older conversation history or a skill suggests them. Select the target by project, cwd and threadId; multiple projects can share one runnerId. Ask only when candidates remain ambiguous. thread_delegate returns admission, not completion; check task status and an explicit thread_report. Generate one UUID requestId per request, reuse it for retries, and on timeout query thread_tasks with that requestId instead of delegating with a new ID.` }));
 	let reported = new Set();
 	pi.on("session_start", (_, ctx) => {
 		reported = new Set(ctx.sessionManager.getEntries().filter((entry) => entry.customType === "tower-collaboration-report").map((entry) => entry.details?.taskId));
