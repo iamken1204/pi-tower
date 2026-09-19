@@ -1,6 +1,6 @@
 # Cloud threads SQLite phase-0 probe
 
-Status: historical record from 2026-09-14. `better-sqlite3@13.0.3` has since become a product dependency in `package.json`. The probe scripts below are still in `test/compat/`.
+Status: historical record from 2026-09-14. `better-sqlite3@13.0.3` became a product dependency, then gave way to Bun's built-in `bun:sqlite` on 2026-09-19 when Tower and the runner moved to Bun. The probe scripts named below were removed with it; commit 9734d26 is the last one where they run under `test/compat/`.
 
 ## Decision
 
