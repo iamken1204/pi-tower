@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import WebSocket from "ws";
-import { createTower } from "../tower.mjs";
+import { createTower } from "../src/tower.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dir = mkdtempSync(resolve(tmpdir(), "pi-native-"));
@@ -57,7 +57,7 @@ try {
 	writeFileSync(resolve(dir, "agent/settings.json"), JSON.stringify({ defaultProvider: "phase1", defaultModel: "faux-1", compaction: { enabled: false }, quietStartup: true }));
 	await startTower();
 	const env = { HOME: resolve(dir, "home"), PI_CODING_AGENT_DIR: resolve(dir, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, MANAGED_TEST_LOG: resolve(dir, "starts.jsonl") };
-	const args = [process.execPath, resolve(root, "runner.mjs"), "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "native-test", "--token", token, "--data-dir", resolve(dir, "runner"), "--pi-package", pkg];
+	const args = [process.execPath, resolve(root, "src/runner.mjs"), "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "native-test", "--token", token, "--data-dir", resolve(dir, "runner"), "--pi-package", pkg];
 	const launch = `env ${Object.entries(env).map(([k,v]) => `${k}=${quote(v)}`).join(" ")} ${args.map(quote).join(" ")}`;
 	tmux("-f", "/dev/null", "new-session", "-d", "-s", "native", "-x", "120", "-y", "40", "-c", resolve(dir, "workspace"), launch);
 	tmux("set-option", "remain-on-exit", "on");

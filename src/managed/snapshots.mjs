@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { checkpoint, uuid } from "./managed-storage.mjs";
+import { checkpoint, uuid } from "./storage.mjs";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;

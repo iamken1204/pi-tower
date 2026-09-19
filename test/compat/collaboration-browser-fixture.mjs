@@ -49,9 +49,9 @@ const history = [{ type: "custom", customType: "tower-collaboration-report", tim
 
 const server = createServer((request, response) => {
 	const url = new URL(request.url, "http://fixture");
-	if (url.pathname === "/ui.css") return response.writeHead(200, { "content-type": "text/css; charset=utf-8" }).end(readFileSync(resolve(root, "ui.css")));
+	if (url.pathname === "/ui.css") return response.writeHead(200, { "content-type": "text/css; charset=utf-8" }).end(readFileSync(resolve(root, "src/ui/ui.css")));
 	if ([`/threads/${threadId}`, `/threads/${sourceId}`].includes(url.pathname)) {
-		let html = readFileSync(resolve(root, "threads.html"), "utf8");
+		let html = readFileSync(resolve(root, "src/ui/threads.html"), "utf8");
 		html = html.replace("<script>", "<script>\nclass WebSocket extends EventTarget { static OPEN = 1; readyState = 3; send() {} close() {} }");
 		response.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html);
 		return;

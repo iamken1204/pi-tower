@@ -13,27 +13,19 @@
 	"type": "module",
 	"pi": {
 		"extensions": [
-			"./extension.ts"
+			"./src/extension.ts"
 		],
 		"skills": [
 			"./skills"
 		]
 	},
 	"bin": {
-		"pi-tower": "./tower.mjs",
-		"pi-runner": "./runner.mjs",
-		"pi-task": "./task.mjs"
+		"pi-tower": "./src/tower.mjs",
+		"pi-runner": "./src/runner.mjs",
+		"pi-task": "./src/task.mjs"
 	},
 	"files": [
-		"tower.mjs",
-		"runner.mjs",
-		"task.mjs",
-		"lib.mjs",
-		"managed-*.mjs",
-		"extension.ts",
-		"ui.html",
-		"ui.css",
-		"threads.html",
+		"src",
 		"skills",
 		"README.md",
 		"LICENSE"

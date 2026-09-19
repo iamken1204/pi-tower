@@ -6,10 +6,10 @@ import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
 import { loadToken } from "./lib.mjs";
-import { createManagedTower } from "./managed-tower.mjs";
+import { createManagedTower } from "./managed/tower.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
-const UI_HTML = readFileSync(new URL("./ui.html", import.meta.url));
+const UI_HTML = readFileSync(new URL("./ui/ui.html", import.meta.url));
 const UI_SESSION_COOKIE = "pi_tower_ui_session";
 const UI_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -142,7 +142,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		if (req.method === "GET" && url.pathname === "/ui.css") {
 			res.setHeader("content-type", "text/css; charset=utf-8");
 			res.setHeader("cache-control", "no-cache");
-			res.end(readFileSync(new URL("./ui.css", import.meta.url))); return;
+			res.end(readFileSync(new URL("./ui/ui.css", import.meta.url))); return;
 		}
 		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/") || url.pathname.startsWith("/api/managed/"))) {
 			const runnerTransfer = url.pathname.startsWith("/api/managed/snapshots/");
@@ -155,7 +155,7 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 		if (req.method === "GET" && (url.pathname === "/threads" || url.pathname === "/threads/" || /^\/threads\/[0-9a-f-]{36}$/i.test(url.pathname))) {
 			res.setHeader("content-type", "text/html; charset=utf-8");
 			res.setHeader("cache-control", "no-store");
-			res.end(readFileSync(new URL("./threads.html", import.meta.url))); return;
+			res.end(readFileSync(new URL("./ui/threads.html", import.meta.url))); return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/logout") {
 			if (!uiPrincipal(req)) { res.writeHead(401).end(); return; }

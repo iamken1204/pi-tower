@@ -6,10 +6,10 @@ import { cpSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
-import { createCollaborationStore } from "../managed-collaboration-store.mjs";
-import { deliverResult } from "../managed-collaboration-runtime.mjs";
-import { ManagedRunner } from "../managed-runner.mjs";
-import { durableWrite, readJson } from "../managed-storage.mjs";
+import { createCollaborationStore } from "../src/managed/collaboration-store.mjs";
+import { deliverResult } from "../src/managed/collaboration-runtime.mjs";
+import { ManagedRunner } from "../src/managed/runner.mjs";
+import { durableWrite, readJson } from "../src/managed/storage.mjs";
 
 const root = mkdtempSync(resolve(tmpdir(), "pi-collaboration-recovery-"));
 const ids = { source: randomUUID(), target: randomUUID(), instance: randomUUID(), request: randomUUID() };

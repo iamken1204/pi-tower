@@ -34,8 +34,8 @@ export default function(pi) {
 			env: { PATH: process.env.PATH, HOME: resolve(dir, "home"), PI_CODING_AGENT_DIR: resolve(dir, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, PROBE_ROOT: dir } });
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 } else {
-	const { createTower } = await import("../tower.mjs");
-	const { ManagedRunner } = await import("../managed-runner.mjs");
+	const { createTower } = await import("../src/tower.mjs");
+	const { ManagedRunner } = await import("../src/managed/runner.mjs");
 	const dir = process.env.PROBE_ROOT, token = "isolated-collaboration";
 	const tower = createTower({ token, dataDir: resolve(dir, "tower") });
 	tower.listen(0, "127.0.0.1"); await once(tower, "listening");

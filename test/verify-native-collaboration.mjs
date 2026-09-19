@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { createTower } from "../tower.mjs";
+import { createTower } from "../src/tower.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dir = mkdtempSync(resolve(tmpdir(), "pi-native-collaboration-"));
@@ -54,7 +54,7 @@ try {
 	for (const name of ["A", "B"]) {
 		cpSync(resolve(dir, "agent"), resolve(dir, `agent-${name}`), { recursive: true });
 		const env = { ...common, PI_CODING_AGENT_DIR: resolve(dir, `agent-${name}`), FIXTURE_RUNNER: name };
-		const args = [process.execPath, resolve(root, "runner.mjs"), "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "shared-native", "--token", token, "--data-dir", resolve(dir, "runner"), "--pi-package", pkg];
+		const args = [process.execPath, resolve(root, "src/runner.mjs"), "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "shared-native", "--token", token, "--data-dir", resolve(dir, "runner"), "--pi-package", pkg];
 		const launch = `env -u PI_TOWER_URL -u PI_TOWER_TOKEN -u PI_TOWER_TOKEN_FILE ${Object.entries(env).map(([key, value]) => `${key}=${quote(value)}`).join(" ")} ${args.map(quote).join(" ")}`;
 		launches.set(name, launch);
 		tmux("-f", "/dev/null", "new-session", "-d", "-s", name, "-x", "120", "-y", "35", "-c", resolve(dir, name === "A" ? "fx" : "pi"), launch);

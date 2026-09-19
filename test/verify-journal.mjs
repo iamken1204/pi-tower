@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { CommandJournal, commandPayload } from "../managed-journal.mjs";
+import { CommandJournal, commandPayload } from "../src/managed/journal.mjs";
 
 const directory = mkdtempSync(resolve(tmpdir(), "pi-command-journal-"));
 try {

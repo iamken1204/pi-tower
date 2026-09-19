@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import Database from "better-sqlite3";
-import { COLLABORATION_METADATA_BYTES, COLLABORATION_PAGE_MAX, COLLABORATION_TEXT_BYTES, createCollaborationStore } from "../managed-collaboration-store.mjs";
+import { COLLABORATION_METADATA_BYTES, COLLABORATION_PAGE_MAX, COLLABORATION_TEXT_BYTES, createCollaborationStore } from "../src/managed/collaboration-store.mjs";
 
 const directory = mkdtempSync(resolve(tmpdir(), "pi-collaboration-store-"));
 let db = new Database(resolve(directory, "tower.db"));

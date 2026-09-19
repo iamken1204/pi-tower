@@ -1,5 +1,5 @@
 // pi-tower extension: lets the model dispatch work to remote pi runners via a tower.
-// Activate with: pi -e ./extension.ts --tower wss://hq.example.com --tower-token <t>
+// Activate with: pi -e ./src/extension.ts --tower wss://hq.example.com --tower-token <t>
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { formatRunners, listRunners, runTask } from "./lib.mjs";

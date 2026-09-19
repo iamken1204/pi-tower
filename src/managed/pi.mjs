@@ -1,11 +1,11 @@
 // Process-owning public pi RPC host. Only the runner can feed this child's stdin.
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
-import { holdWriterLock } from "./managed-lock.mjs";
+import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./storage.mjs";
+import { holdWriterLock } from "./lock.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
+import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./collaboration-runtime.mjs";
 
 const [packageDir, recordFile] = process.argv.slice(2);
 const writerGuard = holdWriterLock(resolve(recordFile, "../runtime.sqlite"));

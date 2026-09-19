@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createJiti } from "jiti";
-import { createTower } from "../tower.mjs";
+import { createTower } from "../src/tower.mjs";
 import { CANNED_ANSWER, cannedAnswer, connectFakeRunner } from "./fake-runner.mjs";
 
 const TOKEN = "t0k";
@@ -28,7 +28,7 @@ const piStub = {
 };
 
 const jiti = createJiti(import.meta.url, { alias: { "@earendil-works/pi-coding-agent": "data:text/javascript," } });
-const factory = await jiti.import("../extension.ts", { default: true });
+const factory = await jiti.import("../src/extension.ts", { default: true });
 factory(piStub);
 assert.deepEqual([...tools.keys()].sort(), ["runner_list", "runner_task"]);
 console.log("ok tools registered");
@@ -61,7 +61,7 @@ assert.equal(r2.content[0].text, cannedAnswer("s2"));
 console.log("ok parallel runner_task sessions route independently");
 
 const run = promisify(execFile);
-const taskBin = fileURLToPath(new URL("../task.mjs", import.meta.url));
+const taskBin = fileURLToPath(new URL("../src/task.mjs", import.meta.url));
 const env = { ...process.env, PI_TOWER_URL: `ws://127.0.0.1:${port}`, PI_TOWER_TOKEN: TOKEN };
 
 const listOut = await run("node", [taskBin, "--list"], { env });

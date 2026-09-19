@@ -7,8 +7,8 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import { createTower } from "../tower.mjs";
-import { checkpoint, durableWrite, readJson } from "../managed-storage.mjs";
+import { createTower } from "../src/tower.mjs";
+import { checkpoint, durableWrite, readJson } from "../src/managed/storage.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = process.env.PI_COMPAT_PACKAGE || resolve(execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "@earendil-works/pi-coding-agent");
@@ -40,7 +40,7 @@ async function tower() {
 	server.listen(port ?? 0, "127.0.0.1"); await once(server, "listening"); port = server.address().port;
 }
 function runner(cwd = "workspace", data = "data", boundary) {
-	const executable = boundary ? [resolve(root, "test/compat/crash-managed-runner.mjs"), boundary, resolve(root, "runner.mjs")] : [resolve(root, "runner.mjs")];
+	const executable = boundary ? [resolve(root, "test/compat/crash-managed-runner.mjs"), boundary, resolve(root, "src/runner.mjs")] : [resolve(root, "src/runner.mjs")];
 	const child = spawn(process.execPath, [...executable, "--hq", `ws://127.0.0.1:${port}`, "--id", "managed-test", "--token", token,
 		"--managed-threads", "--data-dir", resolve(temp, data), "--pi-package", pkg, "--managed-idle-ms", "150"],
 	{ cwd: resolve(temp, cwd), env, stdio: ["ignore", "ignore", "pipe"] });

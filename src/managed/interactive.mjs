@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { existsSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { ManagedRunner } from "./managed-runner.mjs";
-import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./managed-storage.mjs";
-import { holdWriterLock } from "./managed-lock.mjs";
-import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./managed-collaboration-runtime.mjs";
+import { ManagedRunner } from "./runner.mjs";
+import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./storage.mjs";
+import { holdWriterLock } from "./lock.mjs";
+import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./collaboration-runtime.mjs";
 
 export async function runInteractive(options) {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("interactive_requires_terminal");

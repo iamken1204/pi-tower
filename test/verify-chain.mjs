@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createTower } from "../tower.mjs";
+import { createTower } from "../src/tower.mjs";
 
 const TOKEN = "t0k";
 const server = createTower({ token: TOKEN });
@@ -12,7 +12,7 @@ const port = server.address().port;
 
 const runner = spawn(
 	"node",
-	["runner.mjs", "--hq", `ws://127.0.0.1:${port}`, "--id", "chain-test", "--token", TOKEN, "--", "--no-session"],
+	["src/runner.mjs", "--hq", `ws://127.0.0.1:${port}`, "--id", "chain-test", "--token", TOKEN, "--", "--no-session"],
 	{ stdio: ["ignore", "inherit", "inherit"] },
 );
 

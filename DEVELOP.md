@@ -12,7 +12,7 @@ npm install -g @earendil-works/pi-coding-agent@0.85.1
 ## Tower（終端機 1）
 
 ```sh
-node tower.mjs \
+node src/tower.mjs \
   --port 9000 \
   --token local-dev \
   --data-dir "$HOME/.pi-tower-dev/tower"
@@ -21,7 +21,7 @@ node tower.mjs \
 ## Runner（終端機 2）
 
 ```sh
-node runner.mjs \
+node src/runner.mjs \
   --hq ws://127.0.0.1:9000 \
   --id local-native \
   --token local-dev \
@@ -33,7 +33,7 @@ node runner.mjs \
 另開終端機。
 
 ```sh
-node runner.mjs \
+node src/runner.mjs \
   --hq ws://127.0.0.1:9000 \
   --id local-web \
   --token local-dev \

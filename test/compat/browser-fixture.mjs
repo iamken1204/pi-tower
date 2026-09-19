@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTower } from "../../tower.mjs";
+import { createTower } from "../../src/tower.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const directory = mkdtempSync(resolve(tmpdir(), "pi-browser-fixture-"));
@@ -20,7 +20,7 @@ tower.listen(0, "127.0.0.1"); await once(tower, "listening");
 const port = tower.address().port;
 let runner;
 function startRunner() {
-	runner = spawn(process.execPath, [resolve(root, "runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", "fixture-runner", "--token", token,
+	runner = spawn(process.execPath, [resolve(root, "src/runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", "fixture-runner", "--token", token,
 		"--managed-threads", "--data-dir", resolve(directory, "runner"), "--pi-package", pkg, "--managed-idle-ms", "1000"], {
 		cwd: resolve(directory, "workspace"), stdio: ["ignore", "ignore", "inherit"],
 		env: { PATH: process.env.PATH, HOME: resolve(directory, "home"), PI_CODING_AGENT_DIR: resolve(directory, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, MANAGED_TEST_LOG: resolve(directory, "children.jsonl") },

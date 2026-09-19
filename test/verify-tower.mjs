@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { createTower } from "../tower.mjs";
+import { createTower } from "../src/tower.mjs";
 import { connectFakeRunner } from "./fake-runner.mjs";
 
 const TOKEN = "t0k";

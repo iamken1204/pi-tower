@@ -23,8 +23,8 @@ For ordinary pi without the thread tools, remote agents can register with the le
 If the `runner_task` / `runner_list` extension tools are available, use them directly. Otherwise use the bundled CLI for legacy relay work (paths relative to this skill directory):
 
 ```bash
-node ../../task.mjs --list                    # list runners: id, session count, connected time
-node ../../task.mjs <runner-id> "<prompt>"    # dispatch; blocks until the remote agent finishes
+node ../../src/task.mjs --list                    # list runners: id, session count, connected time
+node ../../src/task.mjs <runner-id> "<prompt>"    # dispatch; blocks until the remote agent finishes
 ```
 
 `pi-task` on PATH is the same tool. Connection settings come from `PI_TOWER_URL` plus `PI_TOWER_TOKEN` or `PI_TOWER_TOKEN_FILE`, with matching `--tower`, `--token`, and `--token-file` flags; with none of the token settings it reads `~/.pi-tower/token`. `--session <name>`: tasks with the same name share conversation context on the runner, different names run in parallel (default: main). Add `--fresh` to reset the session's conversation first.

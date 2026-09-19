@@ -7,8 +7,8 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import WebSocket from "ws";
-import { createTower } from "../tower.mjs";
-import { commandPayload, payloadHash } from "../managed-journal.mjs";
+import { createTower } from "../src/tower.mjs";
+import { commandPayload, payloadHash } from "../src/managed/journal.mjs";
 
 const token = "fake-collaboration-protocol";
 const bob = "bob@example.com";

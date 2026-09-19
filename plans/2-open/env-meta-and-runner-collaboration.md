@@ -189,12 +189,12 @@ Fake pi 用於協定與故障測試；真實 pi 使用無付費 LLM 的可控 pr
 
 以下是調查入口，不要求每處都修改，也不新增通用協作框架：
 
-- [`managed-runner.mjs`](../../managed-runner.mjs)：thread／runner 綁定、環境資料與命令路由。
-- [`managed-tower.mjs`](../../managed-tower.mjs)：SQLite 目錄、metadata version、認證後查詢與持久命令收據。
-- [`managed-journal.mjs`](../../managed-journal.mjs)：命令 ID／內容雜湊去重及重啟後 unknown 處理。
-- [`managed-interactive.mjs`](../../managed-interactive.mjs)：原生 session 的公開 SDK 整合、輸入佇列與生命週期。
-- [`extension.ts`](../../extension.ts)、[`lib.mjs`](../../lib.mjs)：現有 legacy 工具契約；`runTask` 等待 settled 再取最後回答，不適合作為新委派的結果關聯實作。
-- [`threads.html`](../../threads.html)、[`ui.html`](../../ui.html)：thread 資訊、協作訊息及首頁相容性。
+- [`src/managed/runner.mjs`](../../src/managed/runner.mjs)：thread／runner 綁定、環境資料與命令路由。
+- [`src/managed/tower.mjs`](../../src/managed/tower.mjs)：SQLite 目錄、metadata version、認證後查詢與持久命令收據。
+- [`src/managed/journal.mjs`](../../src/managed/journal.mjs)：命令 ID／內容雜湊去重及重啟後 unknown 處理。
+- [`src/managed/interactive.mjs`](../../src/managed/interactive.mjs)：原生 session 的公開 SDK 整合、輸入佇列與生命週期。
+- [`src/extension.ts`](../../src/extension.ts)、[`src/lib.mjs`](../../src/lib.mjs)：現有 legacy 工具契約；`runTask` 等待 settled 再取最後回答，不適合作為新委派的結果關聯實作。
+- [`src/ui/threads.html`](../../src/ui/threads.html)、[`src/ui/ui.html`](../../src/ui/ui.html)：thread 資訊、協作訊息及首頁相容性。
 - [`test/`](../../test/)：沿用隔離測試方式，新增可控制排隊與故障時序的協作案例。
 
 ## 11. 實作與驗證紀錄

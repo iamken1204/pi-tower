@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 import { loadToken } from "./lib.mjs";
-import { ManagedRunner } from "./managed-runner.mjs";
+import { ManagedRunner } from "./managed/runner.mjs";
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -75,7 +75,7 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv.slice(2));
 if (options.interactive) {
-	await (await import("./managed-interactive.mjs")).runInteractive(options);
+	await (await import("./managed/interactive.mjs")).runInteractive(options);
 	process.exit(0);
 }
 const { hq, id, token, piArgs } = options;

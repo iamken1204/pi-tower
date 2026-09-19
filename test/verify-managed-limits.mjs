@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
-import { createManagedTower } from "../managed-tower.mjs";
+import { createManagedTower } from "../src/managed/tower.mjs";
 
 class Socket extends EventEmitter {
 	readyState = 1;

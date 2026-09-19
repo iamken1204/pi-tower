@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { durableWrite, privateDirectory, readJson, uuid } from "./managed-storage.mjs";
+import { durableWrite, privateDirectory, readJson, uuid } from "./storage.mjs";
 
 const textLimit = Number(process.env.PI_MANAGED_TEXT_BYTES ?? 256 * 1024);
 if (!Number.isSafeInteger(textLimit) || textLimit < 1) throw new Error("invalid_managed_text_limit");

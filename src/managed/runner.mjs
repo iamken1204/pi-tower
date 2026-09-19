@@ -4,11 +4,11 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync
 import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkpoint, durableWrite, loadCheckpoint, privateDirectory, readJson, syncFile, uuid } from "./managed-storage.mjs";
-import { CommandJournal, commandPayload } from "./managed-journal.mjs";
-import { parseEnvelope } from "./managed-snapshots.mjs";
-import { holdWriterLock } from "./managed-lock.mjs";
-import { collaborationText } from "./managed-collaboration-store.mjs";
+import { checkpoint, durableWrite, loadCheckpoint, privateDirectory, readJson, syncFile, uuid } from "./storage.mjs";
+import { CommandJournal, commandPayload } from "./journal.mjs";
+import { parseEnvelope } from "./snapshots.mjs";
+import { holdWriterLock } from "./lock.mjs";
+import { collaborationText } from "./collaboration-store.mjs";
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -401,7 +401,7 @@ export class ManagedRunner {
 		record.interrupted = false;
 		durableWrite(entry.recordFile, record); // Before spawn: any uncertain startup requires operator recovery.
 		entry.state = "starting";
-		const child = spawn(process.execPath, [fileURLToPath(new URL("./managed-pi.mjs", import.meta.url)), this.piPackage, entry.recordFile], {
+		const child = spawn(process.execPath, [fileURLToPath(new URL("./pi.mjs", import.meta.url)), this.piPackage, entry.recordFile], {
 			cwd: record.effectiveCwd, stdio: ["pipe", "pipe", "inherit", "ipc"],
 		});
 		const runtime = { child, pending: new Map(), closing: false, savedShutdown: false };

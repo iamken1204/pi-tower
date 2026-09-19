@@ -61,7 +61,7 @@ try {
 	for (const dir of ["home", "agent/extensions", "workspace", "runner", "backup"]) mkdirSync(resolve(temp, dir), { recursive: true });
 	cpSync(resolve(root, "test/compat/managed-extension.mjs"), resolve(temp, "agent/extensions/fixture.js"));
 	writeFileSync(resolve(temp, "agent/settings.json"), JSON.stringify({ defaultProvider: "phase1", defaultModel: "faux-1", compaction: { enabled: false } }));
-	runner = spawn(process.execPath, [resolve(root, "runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", name, "--token", token,
+	runner = spawn(process.execPath, [resolve(root, "src/runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", name, "--token", token,
 		"--managed-threads", "--data-dir", resolve(temp, "runner"), "--pi-package", pkg], {
 		cwd: resolve(temp, "workspace"), stdio: ["ignore", "ignore", "inherit"],
 		env: { PATH: process.env.PATH, HOME: resolve(temp, "home"), PI_CODING_AGENT_DIR: resolve(temp, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, MANAGED_TEST_LOG: resolve(temp, "children.jsonl") },
@@ -81,7 +81,7 @@ try {
 		"sh", "-c", "tar -C /data -czf /backup/data.tgz .");
 	docker("run", "--rm", "--user", "0", "-v", `${volumes[1]}:/data`, "-v", `${temp}/backup:/backup`, image,
 		"sh", "-c", "tar -C /data -xzf /backup/data.tgz");
-	const inspect = `import assert from 'node:assert/strict'; import Database from 'better-sqlite3'; import {createSnapshotStore} from './managed-snapshots.mjs';
+	const inspect = `import assert from 'node:assert/strict'; import Database from 'better-sqlite3'; import {createSnapshotStore} from './src/managed/snapshots.mjs';
 		const db=new Database('/data/tower.sqlite',{readonly:true}); assert.equal(db.pragma('integrity_check',{simple:true}),'ok');
 		const snapshot=createSnapshotStore(db).latest('${created.threadId}');
 		assert.equal(snapshot.hash,'${before.hash}'); assert.equal(snapshot.envelope.leafId,${JSON.stringify(before.leafId)});

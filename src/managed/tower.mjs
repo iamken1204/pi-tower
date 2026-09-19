@@ -3,10 +3,10 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { statSync, statfsSync } from "node:fs";
-import { firstPrompt, privateDirectory, uuid } from "./managed-storage.mjs";
-import { createSnapshotStore } from "./managed-snapshots.mjs";
-import { commandPayload, payloadHash } from "./managed-journal.mjs";
-import { createCollaborationStore, collaborationMetadata, collaborationPageLimit } from "./managed-collaboration-store.mjs";
+import { firstPrompt, privateDirectory, uuid } from "./storage.mjs";
+import { createSnapshotStore } from "./snapshots.mjs";
+import { commandPayload, payloadHash } from "./journal.mjs";
+import { createCollaborationStore, collaborationMetadata, collaborationPageLimit } from "./collaboration-store.mjs";
 
 // Runtime states with a live pi process; sleeping, interrupted and error threads are inactive.
 const AWAKE = new Set(["starting", "idle", "running", "waiting_input", "stopping"]);

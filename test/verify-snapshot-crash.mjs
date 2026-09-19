@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { createSnapshotStore } from "../managed-snapshots.mjs";
+import { createSnapshotStore } from "../src/managed/snapshots.mjs";
 
 const ids = {
 	threadId: "10000000-0000-4000-8000-000000000001",

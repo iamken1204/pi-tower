@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createSnapshotStore } from "../managed-snapshots.mjs";
+import { createSnapshotStore } from "../src/managed/snapshots.mjs";
 
 const dir = mkdtempSync(resolve(tmpdir(), "pi-snapshots-"));
 const path = resolve(dir, "tower.sqlite");
