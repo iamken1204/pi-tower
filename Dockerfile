@@ -6,7 +6,7 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++
 RUN npm ci --omit=dev --omit=peer
 RUN apk del .build-deps
 COPY src/tower.mjs src/lib.mjs ./src/
-COPY src/managed/tower.mjs src/managed/storage.mjs src/managed/snapshots.mjs src/managed/journal.mjs ./src/managed/
+COPY src/managed/tower.mjs src/managed/storage.mjs src/managed/snapshots.mjs src/managed/journal.mjs src/managed/collaboration-store.mjs ./src/managed/
 COPY src/ui ./src/ui
 RUN mkdir /data && chown node:node /data
 VOLUME ["/data"]
