@@ -2,16 +2,16 @@
 
 ![pi-tower](assets/cover.svg)
 
-Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Register a headless pi on any machine, then let an interactive pi session anywhere dispatch tasks to it by name — like calling a remote coding agent as a tool.
+Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Register a headless pi on any machine, then dispatch tasks to it by name from any shell or agent.
 
 ```
-┌────────────────────── interactive pi (anywhere) ─────────────────────────────────┐
-│  process: pi (interactive TUI)                                                   │
+┌────────────────────── dispatcher (anywhere) ─────────────────────────────────────┐
+│  process: pi-task (task.mjs), run by a person or any agent with a shell          │
 │  ┌────────────────────────────────────────────────────────────┐                  │
-│  │  extension.ts                                              │                  │
-│  │  ├─ registerFlag("--tower", "--tower-token")               │                  │
-│  │  └─ registerTool("runner_list", "runner_task")             │                  │
-│  │       execute() ──── wss ────────────────────────────────────────┐            │
+│  │  pi-task --list                                            │                  │
+│  │  pi-task win-test-1 "<prompt>"                             │                  │
+│  │  └─ final answer on stdout                                 │                  │
+│  │       attach ─────── wss ────────────────────────────────────────┐            │
 │  └────────────────────────────────────────────────────────────┘     │            │
 └─────────────────────────────────────────────────────────────────────┼────────────┘
                                                                       │
@@ -41,9 +41,9 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 ## Setup
 
-Tower and the runner require Bun 1.4.2 or newer; the pi extension and `pi-task` run wherever pi does. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
+Tower and the runner require Bun 1.4.2 or newer; `pi-task` also runs on Node. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
 
-Three roles, each runnable on any machine (even all three on one box); the runner and interactive sides also need `pi` installed.
+Three roles, each runnable on any machine (even all three on one box); the runner side also needs `pi` installed.
 
 **Tower** (any host the runner and interactive sides can both reach)
 
@@ -76,27 +76,13 @@ A checkout can also compile the runner, pi 0.85.1 included, into one executable 
 
 The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
-**Interactive side** (wherever you drive pi from)
+**Dispatch side** (wherever tasks come from)
 
-pi-tower is a pi package bundling the extension (`runner_task` / `runner_list` tools) and the `remote-runner` skill. Install it from npm or GitHub, or try a local checkout without installing:
-
-```sh
-pi install npm:pi-tower
-pi install git:github.com/iamken1204/pi-tower  # or from GitHub
-pi -e /local/path                              # or try a local checkout (this run only)
-```
-
-Then start pi with the tower flags and prompt "use runner_task on win-test-1 to ...":
-
-```sh
-pi --tower wss://hq.example.com --tower-token <shared-token>
-```
-
-In ordinary pi, providers with a direct API key see the relay extension tools natively. Providers that run their agent loop server-side (and never expose extension tools) can use the skill's legacy `pi-task` fallback. Managed and native interactive threads use the `thread_*` tools described under [Asynchronous thread collaboration](#asynchronous-thread-collaboration) below.
+`pi-task` sends a prompt to a runner's legacy relay session and prints the final answer; see [pi-task CLI](#pi-task-cli). Managed and native interactive threads use the `thread_*` tools described under [Asynchronous thread collaboration](#asynchronous-thread-collaboration) below.
 
 ## pi-task CLI
 
-Some providers run their agent loop server-side and never expose extension-registered tools to the model. For legacy relay sessions, `pi-task` lets an agent (or human) dispatch with one shell command. It does not address managed or native interactive threads.
+For legacy relay sessions, `pi-task` lets an agent (or human) dispatch with one shell command. It does not address managed or native interactive threads.
 
 ```sh
 export PI_TOWER_URL=wss://hq.example.com PI_TOWER_TOKEN=<shared-token>
@@ -110,7 +96,7 @@ stdout carries only the final answer, so `$(pi-task ...)` captures cleanly; prog
 
 Each runner runs one `pi --mode rpc` process per session, so different sessions run in parallel with full process isolation. Tasks that reuse a session name continue its conversation — context survives between tasks and across detach/reattach. The default session is `main`; names match `[A-Za-z0-9._-]{1,64}`. A session nobody is attached to is closed after 30 minutes without output, which ends its `pi` process and discards its conversation. Tune that with `--idle-ttl 2h` / `PI_TOWER_IDLE_TTL` (`s`, `m`, or `h`; `0` disables), or close a session by hand from the web UI.
 
-pi users get discovery via the bundled `remote-runner` skill automatically. For non-pi agents, add a line to the project's AGENTS.md instead:
+Managed and native interactive threads load the bundled `remote-runner` skill automatically. For any other agent, add a line to the project's AGENTS.md:
 
 ```md
 Remote runner tasks: `pi-task <runner-id> "<prompt>"`; list runners: `pi-task --list` (env: PI_TOWER_URL and PI_TOWER_TOKEN or PI_TOWER_TOKEN_FILE).
@@ -150,7 +136,7 @@ Detaching a client leaves its session pipe idle on the tower, so a later attach 
 
 Single shared token, sent as an Authorization header on every upgrade and HTTP request, so it stays out of URLs and access logs. Run the tower behind a TLS reverse proxy (caddy/nginx) so the public URL is `wss://`; the token and all traffic are plaintext otherwise. Anyone with the token can drive any runner — runners execute arbitrary commands, so treat the token like an SSH key.
 
-The legacy relay (`/runner`, `/runner-session`, `/attach`, `pi-task` and the `runner_task` tool) is a pure pipe: Tower forwards frames without reading them, records nothing, and consults no policy beyond the token. The only trace of a relayed task is the transcript a runner keeps when started without `--no-session`. Deployments that need per-person permissions or an audit trail use Cloud Threads, where every command carries an actor and passes the policy; the legacy relay is outside that contract.
+The legacy relay (`/runner`, `/runner-session`, `/attach` and `pi-task`) is a pure pipe: Tower forwards frames without reading them, records nothing, and consults no policy beyond the token. The only trace of a relayed task is the transcript a runner keeps when started without `--no-session`. Deployments that need per-person permissions or an audit trail use Cloud Threads, where every command carries an actor and passes the policy; the legacy relay is outside that contract.
 
 ## Verify
 

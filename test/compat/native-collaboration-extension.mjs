@@ -9,7 +9,6 @@ export default function(pi) {
 		assert.equal(process.env.PI_TOWER_TOKEN, undefined);
 		const tools = context.tools.map(tool => tool.name);
 		for (const name of ["thread_list", "thread_delegate", "thread_tasks", "thread_report"]) assert.ok(tools.includes(name), name);
-		assert.ok(!tools.includes("runner_task") && !tools.includes("runner_list"));
 		assert.match(context.systemPrompt, /These tools reuse this Runner's Tower connection/);
 		assert.match(context.systemPrompt, /admission, not completion/);
 		assert.ok(context.systemPrompt.includes(process.env.EXPECTED_SKILL));

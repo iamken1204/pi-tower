@@ -1,24 +1,13 @@
 {
 	"name": "pi-tower",
 	"version": "0.3.0",
-	"description": "Control tower for remote pi runners: relay server, runner wrapper, and pi extension",
-	"keywords": [
-		"pi-package"
-	],
+	"description": "Control tower for remote pi runners: relay server, runner wrapper, and task CLI",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/iamken1204/pi-tower.git"
 	},
 	"type": "module",
-	"pi": {
-		"extensions": [
-			"./src/extension.ts"
-		],
-		"skills": [
-			"./skills"
-		]
-	},
 	"bin": {
 		"pi-tower": "./src/tower.mjs",
 		"pi-runner": "./src/runner.mjs",
@@ -33,7 +22,7 @@
 	"scripts": {
 		"build:runner": "bun scripts/build-runner.mjs",
 		"verify:ui": "bun run test/verify-ui.mjs",
-		"verify": "bun run test/verify-tower.mjs && bun run test/verify-chain.mjs && bun run test/verify-extension.mjs && bun run test/verify-package.mjs && bun run test/compat/verify-pi.mjs && bun run test/compat/verify-crash.mjs && bun run test/verify-managed.mjs && bun run test/verify-journal.mjs && bun run test/verify-snapshots.mjs && bun run test/verify-snapshot-crash.mjs && bun run test/verify-managed-limits.mjs && bun run test/verify-prepare-crash.mjs && bun run verify:native && bun run verify:collaboration",
+		"verify": "bun run test/verify-tower.mjs && bun run test/verify-chain.mjs && bun run test/verify-task.mjs && bun run test/compat/verify-pi.mjs && bun run test/compat/verify-crash.mjs && bun run test/verify-managed.mjs && bun run test/verify-journal.mjs && bun run test/verify-snapshots.mjs && bun run test/verify-snapshot-crash.mjs && bun run test/verify-managed-limits.mjs && bun run test/verify-prepare-crash.mjs && bun run verify:native && bun run verify:collaboration",
 		"verify:phase0": "bun run test/compat/verify-isolated.mjs",
 		"verify:native": "bun run test/verify-native.mjs",
 		"verify:collaboration": "bun run test/compat/verify-collaboration-api.mjs && bun run test/verify-collaboration-store.mjs && bun run test/verify-collaboration-recovery.mjs && bun run test/verify-collaboration-protocol.mjs && bun run test/verify-collaboration.mjs && bun run test/verify-native-collaboration.mjs",
@@ -42,12 +31,8 @@
 	"engines": {
 		"bun": ">=1.4.2"
 	},
-	"peerDependencies": {
-		"typebox": "*"
-	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "0.85.1",
-		"jiti": "^2.4.0",
 		"playwright": "1.61.1"
 	}
 }

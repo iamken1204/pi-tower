@@ -105,6 +105,6 @@
     </g>
 
     <!-- footer install hint -->
-    <text x="1160" y="398" text-anchor="end" font-family="'SFMono-Regular', Consolas, monospace" font-size="11" fill="#5c6f93">pi install npm:pi-tower</text>
+    <text x="1160" y="398" text-anchor="end" font-family="'SFMono-Regular', Consolas, monospace" font-size="11" fill="#5c6f93">bunx pi-tower</text>
   </g>
 </svg>

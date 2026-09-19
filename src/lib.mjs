@@ -1,4 +1,4 @@
-// Shared tower client: attach → prompt → settle → final-text flow, used by extension.ts and task.mjs.
+// Shared tower client: attach → prompt → settle → final-text flow, used by task.mjs.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -39,7 +39,7 @@ export function formatRunners(runners) {
 }
 
 export async function runTask({ tower, token, runnerId, session, prompt, fresh, signal, onDelta }) {
-	// { headers } is a Node (undici) and Bun WebSocket extension, not the WHATWG standard. pi loads this file under Node.
+	// { headers } is a Node (undici) and Bun WebSocket extension, not the WHATWG standard. pi-task runs under Node.
 	const ws = new WebSocket(
 		`${tower}/attach?runner=${encodeURIComponent(runnerId)}` + (session ? `&session=${encodeURIComponent(session)}` : ""),
 		{ headers: { authorization: `Bearer ${token}` } },
