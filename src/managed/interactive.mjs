@@ -1,18 +1,18 @@
 // One native pi runtime owns the session; Tower is another input transport.
 import { randomUUID } from "node:crypto";
-import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { existsSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { ManagedRunner } from "./runner.mjs";
 import { checkpoint, durableWrite, firstPrompt, loadCheckpoint, readJson, syncFile } from "./storage.mjs";
 import { holdWriterLock } from "./lock.mjs";
+import { loadPi } from "./pi-sdk.mjs";
 import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./collaboration-runtime.mjs";
 
 export async function runInteractive(options) {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("interactive_requires_terminal");
 	const runner = new ManagedRunner({ ...options, idleTtlMs: 0 });
-	const api = await import(pathToFileURL(`${runner.piPackage}/dist/index.js`));
+	const api = await loadPi(runner.piPackage);
 	let runtime, current;
 	const guards = new Map();
 	const publish = () => { if (runner.ws?.readyState === 1) runner.announce(); };

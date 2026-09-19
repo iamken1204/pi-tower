@@ -40,9 +40,11 @@ async function tower() {
 	server.listen(port ?? 0, "127.0.0.1"); await once(server, "listening"); port = server.address().port;
 }
 function runner(cwd = "workspace", data = "data", boundary) {
+	// PI_RUNNER_BIN runs the uninjected runners from a compiled executable and the pi inside it.
+	const compiled = !boundary && process.env.PI_RUNNER_BIN;
 	const executable = boundary ? [resolve(root, "test/compat/crash-managed-runner.mjs"), boundary, resolve(root, "src/runner.mjs")] : [resolve(root, "src/runner.mjs")];
-	const child = spawn(process.execPath, [...executable, "--hq", `ws://127.0.0.1:${port}`, "--id", "managed-test", "--token", token,
-		"--managed-threads", "--data-dir", resolve(temp, data), "--pi-package", pkg, "--managed-idle-ms", "150"],
+	const child = spawn(compiled ? resolve(compiled) : process.execPath, [...(compiled ? [] : executable), "--hq", `ws://127.0.0.1:${port}`, "--id", "managed-test", "--token", token,
+		"--managed-threads", "--data-dir", resolve(temp, data), ...(compiled ? [] : ["--pi-package", pkg]), "--managed-idle-ms", "150"],
 	{ cwd: resolve(temp, cwd), env, stdio: ["ignore", "ignore", "pipe"] });
 	processes.add(child);
 	child.log = ""; child.stderr.on("data", (data) => { child.log += data; });

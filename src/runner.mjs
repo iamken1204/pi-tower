@@ -4,7 +4,15 @@ import { spawn } from "node:child_process";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 import { loadToken } from "./lib.mjs";
+import { HOST_COMMAND } from "./managed/pi-sdk.mjs";
 import { ManagedRunner } from "./managed/runner.mjs";
+
+// A compiled runner has no separate host script; it starts itself again to host one thread's pi.
+if (process.argv[2] === HOST_COMMAND) {
+	process.argv.splice(2, 1);
+	await import("./managed/pi.mjs");
+	process.exit();
+}
 
 const NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -20,7 +28,7 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		if (argv[i] === "--help") {
-			console.log("pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path]\nToken: --token, --token-file, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE, else ~/.pi-tower/token. --id defaults to the hostname.\nDefault mode is the interactive TUI + web thread [--thread <UUID> | -c | -r]: start in the workspace; like pi, -c/--continue resumes this directory's newest thread, -r/--resume picks one of them, --thread names a UUID. Every thread keeps its original cwd.\n--data-dir defaults to ~/.pi-tower (or PI_RUNNER_DATA_DIR); one process per data directory.\nHeadless: --managed-threads (browser-created threads) or --no-interactive [-- <pi args>] (legacy relay; pi args imply it). Managed modes reject pi args.\n--pi-package <npm package directory>; --managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
+			console.log("pi-runner --hq <ws(s)://host[:port]> [--id name] [--token t | --token-file path]\nToken: --token, --token-file, PI_TOWER_TOKEN, PI_TOWER_TOKEN_FILE, else ~/.pi-tower/token. --id defaults to the hostname.\nDefault mode is the interactive TUI + web thread [--thread <UUID> | -c | -r]: start in the workspace; like pi, -c/--continue resumes this directory's newest thread, -r/--resume picks one of them, --thread names a UUID. Every thread keeps its original cwd.\n--data-dir defaults to ~/.pi-tower (or PI_RUNNER_DATA_DIR); one process per data directory.\nHeadless: --managed-threads (browser-created threads) or --no-interactive [-- <pi args>] (legacy relay; pi args imply it). Managed modes reject pi args.\n--pi-package <npm package directory> replaces the pi this runner ships with; --managed-idle-ms 1800000 (0 disables); --managed-max-awake 4\nPI_MANAGED_TEXT_BYTES=262144 (set on Tower too)\nPI_RUNNER_MAX_SNAPSHOT_BYTES=67108864 (download limit)\nOnly pi 0.85.1 and local-filesystem locks are tested; copying runner data to another host is unsupported.");
 			process.exit(0);
 		}
 		else if (argv[i] === "--hq") opts.hq = argv[++i];

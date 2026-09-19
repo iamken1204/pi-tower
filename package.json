@@ -31,6 +31,7 @@
 		"LICENSE"
 	],
 	"scripts": {
+		"build:runner": "bun scripts/build-runner.mjs",
 		"verify:ui": "bun run test/verify-ui.mjs",
 		"verify": "bun run test/verify-tower.mjs && bun run test/verify-chain.mjs && bun run test/verify-extension.mjs && bun run test/verify-package.mjs && bun run test/compat/verify-pi.mjs && bun run test/compat/verify-crash.mjs && bun run test/verify-managed.mjs && bun run test/verify-journal.mjs && bun run test/verify-snapshots.mjs && bun run test/verify-snapshot-crash.mjs && bun run test/verify-managed-limits.mjs && bun run test/verify-prepare-crash.mjs && bun run verify:native && bun run verify:collaboration",
 		"verify:phase0": "bun run test/compat/verify-isolated.mjs",
@@ -45,7 +46,8 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
-		"playwright": "1.61.1",
-		"jiti": "^2.4.0"
+		"@earendil-works/pi-coding-agent": "0.85.1",
+		"jiti": "^2.4.0",
+		"playwright": "1.61.1"
 	}
 }

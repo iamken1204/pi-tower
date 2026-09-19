@@ -2,12 +2,12 @@
 import { COLLABORATION_TEXT_BYTES, COLLABORATION_METADATA_BYTES, COLLABORATION_PAGE_MAX } from "./collaboration-store.mjs";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { skillsDir } from "./pi-sdk.mjs";
 import { durableWrite, uuid } from "./storage.mjs";
 
 // Keep the host's skill paired with its tools even when pi has an older npm copy.
 export function collaborationSkills(api, base) {
-	const bundled = api.loadSkillsFromDir({ dir: fileURLToPath(new URL("../../skills/remote-runner", import.meta.url)), source: "pi-tower" });
+	const bundled = api.loadSkillsFromDir({ dir: skillsDir, source: "pi-tower" });
 	return { skills: [...base.skills.filter((skill) => skill.name !== "remote-runner"), ...bundled.skills],
 		diagnostics: [...base.diagnostics, ...bundled.diagnostics] };
 }

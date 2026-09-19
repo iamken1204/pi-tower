@@ -1,8 +1,8 @@
 // Process-owning public pi RPC host. Only the runner can feed this child's stdin.
-import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { checkpoint, durableWrite, loadCheckpoint, readJson, syncFile } from "./storage.mjs";
 import { holdWriterLock } from "./lock.mjs";
+import { loadPi, piPackageDir } from "./pi-sdk.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { collaborationSkills, registerCollaborationTools, taskPrompt, deliverResult } from "./collaboration-runtime.mjs";
@@ -12,9 +12,7 @@ const [packageDir, recordFile] = process.argv.slice(2);
 holdWriterLock(resolve(recordFile, "../runtime.sqlite"));
 const record = readJson(recordFile);
 const saved = loadCheckpoint(record.checkpointFile, record.sessionFile, record.piSessionId, process.cwd());
-const api = await import(pathToFileURL(`${packageDir}/dist/index.js`));
-const version = readJson(`${packageDir}/package.json`).version;
-if (version !== "0.85.1") throw new Error(`unsupported_pi_version: expected 0.85.1, got ${version}`);
+const api = await loadPi(piPackageDir(packageDir)); // Checked again: the package may have changed since the runner started.
 const sm = api.SessionManager.open(record.sessionFile);
 if (saved.leafId === null) sm.resetLeaf();
 else sm.branch(saved.leafId);

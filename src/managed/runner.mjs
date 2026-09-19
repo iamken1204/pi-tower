@@ -1,13 +1,13 @@
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { checkpoint, durableWrite, loadCheckpoint, privateDirectory, readJson, syncFile, uuid } from "./storage.mjs";
 import { CommandJournal, commandPayload } from "./journal.mjs";
 import { parseEnvelope } from "./snapshots.mjs";
 import { holdWriterLock } from "./lock.mjs";
+import { PI_VERSION, hostArgs, piPackageDir } from "./pi-sdk.mjs";
 import { collaborationText } from "./collaboration-store.mjs";
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -22,8 +22,7 @@ export class ManagedRunner {
 		this.maxAwake = maxAwake;
 		this.maxSnapshotBytes = Number(process.env.PI_RUNNER_MAX_SNAPSHOT_BYTES ?? 64 * 1024 * 1024);
 		if (!Number.isSafeInteger(this.maxSnapshotBytes) || this.maxSnapshotBytes < 1) throw new Error("invalid_snapshot_limit");
-		this.piPackage = piPackage || resolve(execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "@earendil-works/pi-coding-agent");
-		if (readJson(resolve(this.piPackage, "package.json")).version !== "0.85.1") throw new Error("managed mode requires pi 0.85.1");
+		this.piPackage = piPackageDir(piPackage);
 		privateDirectory(this.dataDir);
 		privateDirectory(resolve(this.dataDir, "threads"));
 		const identityFile = resolve(this.dataDir, "instance.json");
@@ -102,7 +101,7 @@ export class ManagedRunner {
 	}
 
 	announce() {
-		this.emit({ type: "inventory", cwd: this.cwd, createSupported: this.createSupported, threads: this.inventory(), piVersion: "0.85.1" });
+		this.emit({ type: "inventory", cwd: this.cwd, createSupported: this.createSupported, threads: this.inventory(), piVersion: PI_VERSION });
 	}
 
 	inventory() {
@@ -148,7 +147,7 @@ export class ManagedRunner {
 		const fingerprint = JSON.stringify([value.hash, settled, entry.activeCommand ?? null]);
 		if (entry.sync.ack?.fingerprint === fingerprint) return;
 		const envelope = { schemaVersion: 1, threadId: entry.record.threadId, runnerInstanceId: this.identity.instanceId,
-			piSessionId: entry.record.piSessionId, piVersion: "0.85.1", revision: { generationId: entry.generationId ?? this.bootId, counter: ++entry.counter },
+			piSessionId: entry.record.piSessionId, piVersion: PI_VERSION, revision: { generationId: entry.generationId ?? this.bootId, counter: ++entry.counter },
 			previous: entry.sync.ack ? { revision: entry.sync.ack.revision, hash: entry.sync.ack.hash } : null,
 			capturedAt: new Date().toISOString(), settled, runId: entry.activeCommand ?? null,
 			header: value.header, entries: value.entries, leafId: value.leafId };
@@ -401,7 +400,7 @@ export class ManagedRunner {
 		record.interrupted = false;
 		durableWrite(entry.recordFile, record); // Before spawn: any uncertain startup requires operator recovery.
 		entry.state = "starting";
-		const child = spawn(process.execPath, [fileURLToPath(new URL("./pi.mjs", import.meta.url)), this.piPackage, entry.recordFile], {
+		const child = spawn(process.execPath, hostArgs(this.piPackage, entry.recordFile), {
 			cwd: record.effectiveCwd, stdio: ["pipe", "pipe", "inherit", "ipc"],
 		});
 		const runtime = { child, pending: new Map(), closing: false, savedShutdown: false };

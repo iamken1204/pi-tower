@@ -57,7 +57,9 @@ try {
 	writeFileSync(resolve(dir, "agent/settings.json"), JSON.stringify({ defaultProvider: "phase1", defaultModel: "faux-1", compaction: { enabled: false }, quietStartup: true }));
 	await startTower();
 	const env = { HOME: resolve(dir, "home"), PI_CODING_AGENT_DIR: resolve(dir, "agent"), PI_OFFLINE: "1", PI_COMPAT_PACKAGE: pkg, MANAGED_TEST_LOG: resolve(dir, "starts.jsonl") };
-	const args = [process.execPath, resolve(root, "src/runner.mjs"), "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "native-test", "--token", token, "--data-dir", resolve(dir, "runner"), "--pi-package", pkg];
+	// PI_RUNNER_BIN runs this suite against a compiled runner and the pi inside it.
+	const executable = process.env.PI_RUNNER_BIN ? [resolve(process.env.PI_RUNNER_BIN)] : [process.execPath, resolve(root, "src/runner.mjs")];
+	const args = [...executable, "--interactive", "--hq", `ws://127.0.0.1:${port}`, "--id", "native-test", "--token", token, "--data-dir", resolve(dir, "runner"), ...(process.env.PI_RUNNER_BIN ? [] : ["--pi-package", pkg])];
 	const launch = `env ${Object.entries(env).map(([k,v]) => `${k}=${quote(v)}`).join(" ")} ${args.map(quote).join(" ")}`;
 	tmux("-f", "/dev/null", "new-session", "-d", "-s", "native", "-x", "120", "-y", "40", "-c", resolve(dir, "workspace"), launch);
 	tmux("set-option", "remain-on-exit", "on");
