@@ -1,4 +1,5 @@
 // Full chain: probe clients -> tower -> runner.mjs -> one real `pi --mode rpc` per session. No LLM call.
+// PI_RUNNER_BIN runs the chain through a compiled runner and the pi inside it.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -10,9 +11,10 @@ server.listen(0);
 await once(server, "listening");
 const port = server.address().port;
 
+const [executable, ...entry] = process.env.PI_RUNNER_BIN ? [process.env.PI_RUNNER_BIN] : [process.execPath, "src/runner.mjs"];
 const runner = spawn(
-	process.execPath,
-	["src/runner.mjs", "--hq", `ws://127.0.0.1:${port}`, "--id", "chain-test", "--token", TOKEN, "--", "--no-session"],
+	executable,
+	[...entry, "--hq", `ws://127.0.0.1:${port}`, "--id", "chain-test", "--token", TOKEN, "--", "--no-session"],
 	{ stdio: ["ignore", "inherit", "inherit"] },
 );
 

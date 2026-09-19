@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { createTower } from "../../src/tower.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
-const fakeBin = resolve(here, "fixtures/phase0-crash-bin");
+const fakePi = resolve(here, "fixtures/phase0-crash-pi");
 const token = "phase0-crash-probe-token";
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const owned = new Set();
@@ -71,11 +71,11 @@ async function probe(mode) {
 	await Promise.all([mkdir(home, { recursive: true }), mkdir(cwd, { recursive: true }), mkdir(data, { recursive: true })]);
 	const id = `phase0-crash-${mode}`;
 	const piArgs = real ? ["--", "--no-session", "-ne", "-ns", "-np", "--no-themes", "-e", resolve(here, "pi-extension.mjs"), "--provider", "phase0", "--model", "faux-1"] : [];
-	const runner = spawn(process.execPath, [resolve(root, "src/runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", id, "--token", token, "--no-interactive", ...piArgs], {
+	const runner = spawn(process.execPath, [resolve(root, "src/runner.mjs"), "--hq", `ws://127.0.0.1:${port}`, "--id", id, "--token", token, "--pi-package", fakePi, "--no-interactive", ...piArgs], {
 		cwd,
 		env: { HOME: home, XDG_DATA_HOME: data, PI_CODING_AGENT_DIR: data, PI_OFFLINE: "1",
-			PHASE0_REAL_PI: real ? resolve(pkg, "dist/bundle/cli.js") : "", PI_COMPAT_PACKAGE: pkg || "",
-			PI_COMPAT_EVENTS: resolve(base, "events.jsonl"), PHASE0_CRASH_LOG: log, PATH: `${fakeBin}${delimiter}${dirname(process.execPath)}${delimiter}${process.env.PATH}` },
+			PHASE0_REAL_PI: real ? resolve(pkg, "dist/index.js") : "", PI_COMPAT_PACKAGE: pkg || "",
+			PI_COMPAT_EVENTS: resolve(base, "events.jsonl"), PHASE0_CRASH_LOG: log, PATH: process.env.PATH },
 		stdio: ["ignore", "ignore", "pipe"],
 	});
 	owned.add(runner.pid);

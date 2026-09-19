@@ -14,7 +14,7 @@ const compiled = existsSync(resolve(embeddedPi, "package.json"));
 
 export function piPackageDir(explicit) {
 	const directory = explicit ? resolve(explicit) : compiled ? embeddedPi : installedPi();
-	if (readJson(resolve(directory, "package.json")).version !== PI_VERSION) throw new Error(`managed mode requires pi ${PI_VERSION}`);
+	if (readJson(resolve(directory, "package.json")).version !== PI_VERSION) throw new Error(`pi-runner requires pi ${PI_VERSION}`);
 	return directory;
 }
 
@@ -35,9 +35,12 @@ export async function loadPi(directory) {
 // The remote-runner skill that ships with these tools.
 export const skillsDir = compiled ? resolve(embedded, "skills/remote-runner") : fileURLToPath(new URL("../../skills/remote-runner", import.meta.url));
 
-// A compiled runner has no script file to start, so it re-enters itself through a subcommand.
-// From source, Bun would otherwise load the workspace's .env files into the host's environment.
-export const HOST_COMMAND = "__pi-host";
-export function hostArgs(...args) {
-	return compiled ? [HOST_COMMAND, ...args] : ["--no-env-file", fileURLToPath(new URL("./pi.mjs", import.meta.url)), ...args];
-}
+// A compiled runner has no script files to start, so it re-enters itself through a subcommand.
+// From source, Bun would otherwise load the workspace's .env files into the child's environment.
+const reenter = (command, script) => (...args) =>
+	compiled ? [command, ...args] : ["--no-env-file", fileURLToPath(new URL(script, import.meta.url)), ...args];
+
+export const HOST_COMMAND = "__pi-host"; // hosts one managed thread's pi
+export const hostArgs = reenter(HOST_COMMAND, "./pi.mjs");
+export const CLI_COMMAND = "__pi"; // the pi CLI itself, one per legacy relay session
+export const cliArgs = reenter(CLI_COMMAND, "./pi-cli.mjs");

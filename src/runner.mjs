@@ -4,13 +4,15 @@ import { spawn } from "node:child_process";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 import { loadToken } from "./lib.mjs";
-import { HOST_COMMAND } from "./managed/pi-sdk.mjs";
+import { CLI_COMMAND, HOST_COMMAND, cliArgs, piPackageDir } from "./managed/pi-sdk.mjs";
 import { ManagedRunner } from "./managed/runner.mjs";
 
-// A compiled runner has no separate host script; it starts itself again to host one thread's pi.
-if (process.argv[2] === HOST_COMMAND) {
+// A compiled runner has no separate scripts; it starts itself again to host one thread's pi or to run the pi CLI.
+const command = process.argv[2];
+if (command === HOST_COMMAND || command === CLI_COMMAND) {
 	process.argv.splice(2, 1);
-	await import("./managed/pi.mjs");
+	if (command === HOST_COMMAND) await import("./managed/pi.mjs");
+	else await import("./managed/pi-cli.mjs");
 	process.exit();
 }
 
@@ -87,6 +89,7 @@ if (options.interactive) {
 	process.exit(0);
 }
 const { hq, id, token, piArgs } = options;
+const piPackage = piPackageDir(options.piPackage); // A runner without a usable pi stops here, before it registers.
 const managed = options.managed ? new ManagedRunner(options) : null;
 managed?.hostAll();
 managed?.connect({ hq, token });
@@ -101,7 +104,7 @@ function ensureSession(name) {
 	if (managed?.threads.has(name)) return;
 	let entry = children.get(name);
 	if (!entry) {
-		const child = spawn("pi", ["--mode", "rpc", ...piArgs], { stdio: ["pipe", "pipe", "inherit"] });
+		const child = spawn(process.execPath, cliArgs(piPackage, "--mode", "rpc", ...piArgs), { stdio: ["pipe", "pipe", "inherit"] });
 		entry = { child, buf: "", ws: null };
 		children.set(name, entry);
 		// LF-only framing per pi docs/rpc.md; readline is not protocol-compliant

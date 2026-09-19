@@ -8,7 +8,7 @@
 bun install
 ```
 
-Runner 用的 pi 0.85.1 已在 devDependencies，不必另外全域安裝；要換成別的 pi 目錄時加 `--pi-package <目錄>`。舊的 relay 模式（`-- <pi args>`）仍然呼叫 PATH 上的 `pi`。
+Runner 用的 pi 0.85.1 已在 devDependencies，不必另外全域安裝；要換成別的 pi 目錄時加 `--pi-package <目錄>`。舊的 relay 模式（`-- <pi args>`）用的也是同一份。
 
 `--no-env-file` 讓 Bun 不要把目前目錄的 `.env` 讀進 Tower 或 Runner 的環境變數。
 

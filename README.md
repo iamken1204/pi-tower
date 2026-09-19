@@ -28,7 +28,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
                                   │
               wss outbound (runner dials out, NAT/firewall friendly)
                                   │
-┌───────────────────── runner (any machine with pi) ─┼─────────────────────────────┐
+┌───────────────────── runner (any machine) ─────────┼─────────────────────────────┐
 │  process: pi-runner (runner.mjs)                   │                             │
 │  ┌─────────────────────────────────────────────────┴──────────┐                  │
 │  │  pi-runner --hq wss://hq.example.com --id win-test-1       │                  │
@@ -43,7 +43,7 @@ Control tower for remote [pi](https://github.com/earendil-works/pi) runners. Reg
 
 Tower and the runner require Bun 1.4.2 or newer; `pi-task` also runs on Node. Compatibility checks passed with pi 0.85.1 on Bun 1.4.2. This records the tested combination, not a discovered minimum pi version; older pi versions have not been established as supported. Cloud Threads is opt-in and remains under development.
 
-Three roles, each runnable on any machine (even all three on one box); the runner side also needs `pi` installed.
+Three roles, each runnable on any machine (even all three on one box). The runner brings its own pi.
 
 **Tower** (any host the runner and interactive sides can both reach)
 
@@ -72,7 +72,7 @@ Permissions are a programmatic port. Embedding Tower from Bun with `createTower(
 bunx pi-runner --hq wss://hq.example.com --id win-test-1 --token-file /path/to/token -- --no-session
 ```
 
-A checkout can also compile the runner, pi 0.85.1 included, into one executable that needs neither Bun, Node nor a pi installation on the target machine: `bun run build:runner` writes `dist/pi-runner` (`--target bun-linux-x64` and the other Bun targets cross-compile). It ignores `.env` and `bunfig.toml` in the directory it starts from. pi's image-resizing WebAssembly module and native clipboard addon are not bundled, and the relay mode after `--` still starts the `pi` found on `PATH`.
+A checkout can also compile the runner, pi 0.85.1 included, into one executable that needs neither Bun, Node nor a pi installation on the target machine: `bun run build:runner` writes `dist/pi-runner` (`--target bun-linux-x64` and the other Bun targets cross-compile). It ignores `.env` and `bunfig.toml` in the directory it starts from. pi's image-resizing WebAssembly module and native clipboard addon are not bundled.
 
 The tower, runner, and `pi-task` commands accept either `--token <value>` / `PI_TOWER_TOKEN` or `--token-file <path>` / `PI_TOWER_TOKEN_FILE`. Explicit flags override the environment, and `PI_TOWER_TOKEN` takes precedence when both environment variables are set; with none of them, all three read `~/.pi-tower/token`. `pi-runner` alone starts the interactive Cloud Threads terminal described below; args after `--` (or `--no-interactive`) select this headless relay instead. Args after `--` go to the spawned `pi --mode rpc` and are all optional. `--no-session` keeps task transcripts off the runner's disk; drop it for an on-machine audit trail of what remote tasks did. The runner dials out and reconnects every 3s, so it works behind NAT. `--id` defaults to the hostname.
 
@@ -167,7 +167,7 @@ Exit pi normally, then resume the way native pi does: from the same directory, `
 
 `--managed-threads` selects the older background RPC mode for browser-created threads. It has no native terminal and accepts prompts only while idle. It is the only process that hosts browser-created threads, and one per data directory. **新增對話** in the browser needs one on the chosen runner and picks one of the directories that runner already works in, the one it started from or any existing thread's; the runner refuses any other path. Legacy relay commands are unchanged.
 
-Run the wrapper from the workspace used for new threads. Existing threads retain that cwd across restarts and always execute on the same runner host. Do not clone or copy a runner data directory to another host; Cloud Threads does not migrate the repo, working tree, credentials, or tool side effects. Managed mode currently accepts pi 0.85.1; this is the tested version, not a minimum inferred from package discovery. The runner uses the pi it ships with: the pinned dependency when run from source, the embedded copy in a compiled runner. `--pi-package /absolute/package/directory` replaces it. Configure models and extensions through normal pi settings. Managed mode rejects passthrough pi arguments, including session, continue, and no-session overrides. Legacy sessions and the commands above remain unchanged when managed mode is disabled.
+Run the wrapper from the workspace used for new threads. Existing threads retain that cwd across restarts and always execute on the same runner host. Do not clone or copy a runner data directory to another host; Cloud Threads does not migrate the repo, working tree, credentials, or tool side effects. The runner accepts pi 0.85.1 only; this is the tested version, not a minimum inferred from package discovery. The runner uses the pi it ships with: the pinned dependency when run from source, the embedded copy in a compiled runner. An npm install of pi-tower carries neither, so it needs `--pi-package /absolute/package/directory`, which also replaces the shipped pi elsewhere. Relay sessions run the same pi. Configure models and extensions through normal pi settings. Managed mode rejects passthrough pi arguments, including session, continue, and no-session overrides. Legacy sessions and the commands above remain unchanged when managed mode is disabled.
 
 For background RPC mode, `--managed-idle-ms` defaults to 1800000 (0 disables idle sleep); `--managed-max-awake` defaults to 4. Idle sleep applies after all viewers disconnect and the run settles, not while tools or dialogs are active. Interactive mode does not idle-sleep. The wrapper and each pi child hold separate OS-backed SQLite locks; interactive pi runs inside the wrapper process. Restart refuses to open a second writer while an old writer holds its lock. After confirmed exit, it validates the local checkpoint and complete appended entries, marks the run interrupted, and never replays uncertain commands. Never delete lock files based on PID absence or age. Use local filesystems, not network shares.
 
