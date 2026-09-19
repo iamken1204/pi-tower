@@ -139,6 +139,11 @@ export function createTower({ token, openTimeoutMs = 15000, idleTtlMs = 30 * 60_
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, "http://x");
+		if (req.method === "GET" && url.pathname === "/ui.css") {
+			res.setHeader("content-type", "text/css; charset=utf-8");
+			res.setHeader("cache-control", "no-cache");
+			res.end(readFileSync(new URL("./ui.css", import.meta.url))); return;
+		}
 		if (managed && (url.pathname === "/api/threads" || url.pathname.startsWith("/api/threads/") || url.pathname.startsWith("/api/managed/"))) {
 			const runnerTransfer = url.pathname.startsWith("/api/managed/snapshots/");
 			const principal = runnerTransfer ? null : uiPrincipal(req);

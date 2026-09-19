@@ -49,6 +49,7 @@ const history = [{ type: "custom", customType: "tower-collaboration-report", tim
 
 const server = createServer((request, response) => {
 	const url = new URL(request.url, "http://fixture");
+	if (url.pathname === "/ui.css") return response.writeHead(200, { "content-type": "text/css; charset=utf-8" }).end(readFileSync(resolve(root, "ui.css")));
 	if ([`/threads/${threadId}`, `/threads/${sourceId}`].includes(url.pathname)) {
 		let html = readFileSync(resolve(root, "threads.html"), "utf8");
 		html = html.replace("<script>", "<script>\nclass WebSocket extends EventTarget { static OPEN = 1; readyState = 3; send() {} close() {} }");
@@ -56,6 +57,7 @@ const server = createServer((request, response) => {
 		return;
 	}
 	if (url.pathname === "/api/managed/runners") return json(response, []);
+	if (url.pathname === "/api/threads") return json(response, { threads: [thread], nextCursor: null });
 	if (url.pathname === `/api/threads/${sourceId}`) return json(response, { ...thread, threadId: sourceId, title: "App work", runnerId: "runner-app" });
 	if (url.pathname === `/api/threads/${sourceId}/tasks`) return json(response, { tasks: tasks.filter((task) => task.sourceThreadId === sourceId || task.targetThreadId === sourceId), nextCursor: null });
 	if (url.pathname === `/api/threads/${sourceId}/history`) return json(response, { entries: history, nextCursor: null, revision: thread.latestSnapshotRevision });

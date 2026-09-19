@@ -32,12 +32,14 @@
 		"managed-*.mjs",
 		"extension.ts",
 		"ui.html",
+		"ui.css",
 		"threads.html",
 		"skills",
 		"README.md",
 		"LICENSE"
 	],
 	"scripts": {
+		"verify:ui": "node test/verify-ui.mjs",
 		"verify": "node test/verify-tower.mjs && node test/verify-chain.mjs && node test/verify-extension.mjs && node test/verify-package.mjs && node test/compat/verify-pi.mjs && node test/compat/verify-crash.mjs && node test/verify-managed.mjs && node test/verify-journal.mjs && node test/verify-snapshots.mjs && node test/verify-snapshot-crash.mjs && node test/verify-managed-limits.mjs && node test/verify-prepare-crash.mjs && npm run verify:native && npm run verify:collaboration",
 		"verify:phase0": "node test/compat/verify-isolated.mjs",
 		"verify:native": "node test/verify-native.mjs",
@@ -55,6 +57,7 @@
 		"typebox": "*"
 	},
 	"devDependencies": {
+		"playwright": "1.61.1",
 		"jiti": "^2.4.0"
 	}
 }
